@@ -175,6 +175,7 @@
 
       <div id="panelTargeting" class="hud-panel">
         <div class="hud-title">TARGETING</div>
+        <div class="hud-row"><span class="hud-muted">STATUS</span><span id="hudStatus">FREE</span></div>
         <div class="hud-row"><span class="hud-muted">TYPE</span><span id="hudType">---</span></div>
         <div class="hud-row"><span class="hud-muted">NAME</span><span id="hudName">---</span></div>
         <div class="hud-row"><span class="hud-muted">LON</span><span id="hudLon">---</span></div>
@@ -346,6 +347,7 @@
 
       const hudLonEl = document.getElementById("hudLon");
       const hudLatEl = document.getElementById("hudLat");
+      const hudStatusEl = document.getElementById("hudStatus");
       const hudTypeEl = document.getElementById("hudType");
       const hudNameEl = document.getElementById("hudName");
       const hudAltEl = document.getElementById("hudAlt");
@@ -362,6 +364,7 @@
       }
 
       function setTargetingUnlocked(lon, lat) {
+        if (hudStatusEl) hudStatusEl.textContent = "FREE";
         if (hudTypeEl) hudTypeEl.textContent = "---";
         if (hudNameEl) hudNameEl.textContent = "---";
         if (hudAltEl) hudAltEl.textContent = "---";
@@ -374,6 +377,8 @@
         const kind = getEntityKind(entity);
         const props = entity && entity.properties ? entity.properties : null;
         if (!props || (kind !== "satellite" && kind !== "aircraft")) return;
+
+        if (hudStatusEl) hudStatusEl.textContent = "LOCKED";
 
         const lon = getPropValue(props.lon);
         const lat = getPropValue(props.lat);
