@@ -19,185 +19,526 @@
     <script src="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Cesium.js"></script>
 
     <style>
-      html,
-      body,
-      #cesiumContainer {
-        width: 100%;
-        height: 100%;
-        margin: 0;
-        padding: 0;
+      /* ── Reset ─────────────────────────────────────────────────────── */
+      *, *::before, *::after { box-sizing: border-box; }
+
+      html, body {
+        width: 100%; height: 100%;
+        margin: 0; padding: 0;
         overflow: hidden;
+        background: #05070a;
       }
 
+      /* ── Tokens ─────────────────────────────────────────────────────── */
+      :root {
+        --c-cyan:       #00f5ff;
+        --c-cyan-dim:   rgba(0, 245, 255, 0.38);
+        --c-cyan-mid:   rgba(0, 245, 255, 0.62);
+        --c-amber:      #ffb000;
+        --c-green:      #00ff6a;   /* active tactical lock only */
+        --c-bg:         #05070a;
+        --c-panel:      rgba(3, 10, 20, 0.82);
+        --c-border:     rgba(0, 245, 255, 0.28);
+        --c-border-hi:  rgba(0, 245, 255, 0.65);
+        --font:         "Share Tech Mono", "Courier New", monospace;
+        /* legacy aliases kept for JS-referenced inline styles */
+        --hud-green:    var(--c-cyan);
+        --hud-amber:    var(--c-amber);
+        --shell-border: var(--c-border-hi);
+        --shell-panel-bg: var(--c-panel);
+      }
+
+      /* ── Outer field ─────────────────────────────────────────────────── */
       body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font);
+        color: var(--c-cyan);
+        text-shadow: 0 0 5px rgba(0, 245, 255, 0.26);
+      }
+
+      /* ── Console frame ───────────────────────────────────────────────── */
+      #appShell {
+        width: 92vw;
+        height: 85vh;
+        display: grid;
+        grid-template-columns: 300px 1fr 300px;
+        grid-template-rows: 1fr 116px;
+        grid-template-areas:
+          "left  center right"
+          "deck  deck   deck";
+        gap: 16px;
+        padding: 16px;
+        background: rgba(4, 9, 18, 0.96);
+        border: 1px solid var(--c-border);
+        box-shadow:
+          0 0 0 1px rgba(0, 245, 255, 0.08),
+          0 0 48px rgba(0, 0, 0, 0.8);
+      }
+
+      /* ── Rails ───────────────────────────────────────────────────────── */
+      #leftShell  { grid-area: left;  display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow: hidden; }
+      #rightShell { grid-area: right; display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow: hidden; }
+
+      /* Rail section headers */
+      .rail-header {
+        font-size: 9px;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: var(--c-amber);
+        opacity: 0.55;
+        padding: 0 2px 6px;
+        border-bottom: 1px solid rgba(255, 176, 0, 0.18);
+        margin-bottom: 4px;
+      }
+
+      /* ── Center scope stage ──────────────────────────────────────────── */
+      #centerShell {
+        grid-area: center;
+        position: relative;
+        display: flex;
+        align-items: stretch;
+        min-width: 0; min-height: 0;
+      }
+
+      #viewportFrame {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        background: #000;
+      }
+
+      /* Octagonal lens mask on the scene */
+      #viewportMask {
+        position: absolute;
+        inset: 0;
+        overflow: hidden;
+        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+      }
+
+      #cesiumContainer {
+        position: absolute;
+        inset: 0;
+        pointer-events: auto;
+        z-index: 1;
+      }
+
+      /* Cesium built-in toolbar must float above the HUD overlays */
+      .cesium-viewer-toolbar,
+      .cesium-widget-credits {
+        pointer-events: auto !important;
+        z-index: 10 !important;
         position: relative;
       }
 
-      :root {
-        --hud-green: #00ff00;
-        --hud-bg: rgba(0, 0, 0, 0.35);
-      }
-
-      /* HUD overlay */
-      #hud {
-        position: absolute;
-        inset: 0;
-        z-index: 9999;
+      /* Animated scanlines inside the lens */
+      #viewportScanlines {
+        position: absolute; inset: 0;
         pointer-events: none;
-        font-family: "Share Tech Mono", "Courier New", monospace;
-        color: var(--hud-green);
-        text-shadow: 0 0 6px rgba(0, 255, 0, 0.65);
+        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(255,255,255,0.032) 0px,
+          rgba(255,255,255,0.032) 1px,
+          transparent 1px,
+          transparent 4px
+        );
+        opacity: 0.55;
+        mix-blend-mode: overlay;
+        z-index: 2;
       }
 
-      .hud-panel {
-        position: absolute;
-        width: 320px;
-        padding: 10px 12px;
-        background: var(--hud-bg);
-        border: 1px solid rgba(0, 255, 0, 0.85);
-        box-sizing: border-box;
-        pointer-events: auto;
+      /* Radial vignette */
+      #viewportVignette {
+        position: absolute; inset: 0;
+        pointer-events: none;
+        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+        background: radial-gradient(
+          ellipse at 50% 50%,
+          transparent 36%,
+          rgba(0,0,0,0.32) 66%,
+          rgba(0,0,0,0.62) 100%
+        );
+        z-index: 3;
       }
+
+      /* Glowing cyan bezel ring */
+      #viewportRing {
+        position: absolute;
+        inset: -1px;
+        pointer-events: none;
+        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+        border: 1px solid var(--c-cyan-mid);
+        box-shadow:
+          inset 0 0 12px rgba(0, 245, 255, 0.09),
+                0 0  8px rgba(0, 245, 255, 0.14);
+        z-index: 4;
+      }
+
+      /* ── Panel glass ─────────────────────────────────────────────────── */
+      .hud-panel {
+        position: relative;
+        width: 100%;
+        padding: 10px 13px;
+        background: var(--c-panel);
+        border: 1px solid var(--c-border);
+        pointer-events: auto;
+        flex-shrink: 0;
+      }
+
+      .hud-panel::before, .hud-panel::after {
+        content: "";
+        position: absolute;
+        width: 10px; height: 10px;
+        border-color: var(--c-border-hi);
+        pointer-events: none;
+      }
+      .hud-panel::before { left:-1px; top:-1px; border-left:1px solid; border-top:1px solid; }
+      .hud-panel::after  { right:-1px; bottom:-1px; border-right:1px solid; border-bottom:1px solid; }
 
       .hud-title {
-        font-size: 14px;
-        letter-spacing: 0.08em;
-        margin: 0 0 8px 0;
+        font-size: 10px;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--c-cyan);
+        opacity: 0.52;
+        margin: 0 0 8px;
       }
 
       .hud-row {
         display: flex;
         justify-content: space-between;
-        gap: 12px;
-        font-size: 13px;
-        line-height: 1.35;
+        gap: 8px;
+        font-size: 12px;
+        line-height: 1.5;
       }
 
       .hud-muted {
-        opacity: 0.85;
+        color: var(--c-amber);
+        opacity: 0.78;
+        font-size: 11px;
       }
 
-      /* Crosshair-style corner accents */
-      .hud-panel::before,
-      .hud-panel::after {
-        content: "";
-        position: absolute;
-        width: 18px;
-        height: 18px;
-        border-color: rgba(0, 255, 0, 0.95);
-        pointer-events: none;
+      /* ── TARGETING panel ─────────────────────────────────────────────── */
+      .target-value.is-free   { opacity: 0.52; }
+      .target-value.is-locked { opacity: 1; color: var(--c-green); text-shadow: 0 0 8px rgba(0,255,106,0.4); }
+
+      #targeting-panel .target-row {
+        display: flex;
+        gap: 8px;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      #targeting-panel .target-label {
+        width: 52px; flex: 0 0 52px;
+        color: var(--c-amber); opacity: 0.78; font-size: 11px;
+      }
+      #targeting-panel .target-value { flex: 1 1 auto; }
+
+      /* ── Feed source list ────────────────────────────────────────────── */
+      .feed-list {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .feed-item {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        font-size: 11px;
+        letter-spacing: 0.06em;
+        padding: 5px 8px;
+        border: 1px solid var(--c-border);
+        background: rgba(0,0,0,0.18);
+      }
+      .feed-dot {
+        width: 6px; height: 6px;
+        border-radius: 50%;
+        background: var(--c-green);
+        box-shadow: 0 0 5px var(--c-green);
+        flex-shrink: 0;
+      }
+      .feed-dot.dim { background: rgba(255,176,0,0.5); box-shadow: none; }
+      .feed-label { flex: 1; }
+      .feed-status { color: var(--c-amber); opacity: 0.72; font-size: 10px; }
+
+      /* ── Tuning sliders ──────────────────────────────────────────────── */
+      .slider-group {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .slider-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 11px;
+      }
+      .slider-label {
+        width: 62px; flex: 0 0 62px;
+        color: var(--c-amber); opacity: 0.78;
+        font-size: 10px; letter-spacing: 0.08em;
+      }
+      .slider-track {
+        flex: 1;
+        -webkit-appearance: none;
+        appearance: none;
+        height: 3px;
+        background: var(--c-border);
+        outline: none;
+        cursor: pointer;
+      }
+      .slider-track::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 10px; height: 10px;
+        background: var(--c-cyan);
+        border-radius: 0;
+        cursor: pointer;
+        box-shadow: 0 0 4px var(--c-cyan);
+      }
+      .slider-val {
+        width: 28px; text-align: right;
+        font-size: 11px; opacity: 0.72;
       }
 
-      .hud-panel::before {
-        left: -1px;
-        top: -1px;
-        border-left: 1px solid;
-        border-top: 1px solid;
+      /* ── Inspect panel ───────────────────────────────────────────────── */
+      #panelInspect { display: none; flex-shrink: 1; overflow: auto; }
+      #inspectBody  { font-size: 11px; line-height: 1.55; white-space: pre-wrap; opacity: 0.88; }
+
+      /* ── Bottom command deck ─────────────────────────────────────────── */
+      #bottomShell {
+        grid-area: deck;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        gap: 8px;
+        padding: 10px 16px;
+        background: var(--c-panel);
+        border: 1px solid var(--c-border);
+        position: relative;
+      }
+      #bottomShell::before {
+        content: ""; position: absolute; left: -1px; top: -1px;
+        width: 10px; height: 10px;
+        border-left: 1px solid var(--c-border-hi); border-top: 1px solid var(--c-border-hi);
+      }
+      #bottomShell::after {
+        content: ""; position: absolute; right: -1px; bottom: -1px;
+        width: 10px; height: 10px;
+        border-right: 1px solid var(--c-border-hi); border-bottom: 1px solid var(--c-border-hi);
       }
 
-      .hud-panel::after {
-        right: -1px;
-        bottom: -1px;
-        border-right: 1px solid;
-        border-bottom: 1px solid;
-      }
+      #panelSensors { width: 100%; background: transparent; border: none; padding: 0; }
+      #panelSensors::before, #panelSensors::after { display: none; }
 
-      /* Panel placement */
-      #panelStatus {
-        left: 14px;
-        top: 14px;
+      .deck-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
       }
-
-      #panelTargeting {
-        right: 14px;
-        top: 14px;
+      .deck-label {
+        width: 90px; flex: 0 0 90px;
+        font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+        color: var(--c-amber); opacity: 0.62;
       }
-
-      #panelInspect {
-        right: 14px;
-        top: 170px;
-        width: 360px;
-        display: none;
-      }
-
-      #inspectBody {
-        font-size: 13px;
-        line-height: 1.35;
-        white-space: pre-wrap;
-      }
-
-      #panelSensors {
-        left: 14px;
-        bottom: 14px;
-        width: 360px;
-      }
-
       .hud-btns {
         display: flex;
-        gap: 10px;
-        margin-top: 10px;
+        gap: 6px;
+        flex-wrap: wrap;
+        align-items: center;
       }
 
-      .hud-btn {
-        font-family: inherit;
-        font-size: 13px;
-        letter-spacing: 0.06em;
-        padding: 8px 10px;
-        border: 1px solid rgba(0, 255, 0, 0.85);
-        background: rgba(0, 0, 0, 0.25);
-        color: var(--hud-green);
-        text-shadow: inherit;
+      /* Chips */
+      .hud-btn, .deck-btn {
+        font-family: var(--font);
+        font-size: 10px;
+        letter-spacing: 0.12em;
+        padding: 5px 13px;
+        border: 1px solid var(--c-border);
+        background: rgba(0,0,0,0.22);
+        color: var(--c-cyan);
+        text-shadow: 0 0 4px rgba(0,245,255,0.22);
+        opacity: 0.60;
+        cursor: pointer;
+        line-height: 1;
+        transition: opacity 0.1s, background 0.1s, border-color 0.1s;
       }
-
-      .hud-btn[disabled] {
-        opacity: 0.45;
-        cursor: not-allowed;
+      .hud-btn:hover, .deck-btn:hover {
+        opacity: 1;
+        border-color: var(--c-cyan-mid);
+        background: rgba(0,245,255,0.07);
       }
-
+      .hud-btn:active, .deck-btn:active { transform: translateY(1px); opacity: 0.82; }
+      .hud-btn[disabled] { opacity: 0.35; cursor: not-allowed; }
       .hud-btn.active {
-        background: rgba(0, 255, 0, 1);
-        border-color: rgba(0, 255, 0, 1);
+        background: var(--c-cyan);
+        border-color: var(--c-cyan);
         color: #000;
         text-shadow: none;
+        opacity: 1;
+      }
+      .deck-btn.active {
+        background: var(--c-cyan);
+        border-color: var(--c-cyan);
+        color: #000;
+        text-shadow: none;
+        opacity: 1;
+        box-shadow: 0 0 10px rgba(0, 245, 255, 0.55);
       }
     </style>
   </head>
   <body>
-    <div id="cesiumContainer"></div>
+    <div id="appShell">
 
-    <div id="hud" aria-hidden="true">
-      <div id="panelStatus" class="hud-panel">
-        <div class="hud-title">SYSTEM STATUS</div>
-        <div class="hud-row"><span class="hud-muted">UPLINK</span><span>SECURE</span></div>
-        <div class="hud-row"><span class="hud-muted">DATALINK</span><span>ACTIVE</span></div>
-        <div class="hud-row"><span class="hud-muted">CLOCK</span><span id="hudClock">--:--:--</span></div>
-      </div>
+      <!-- ── LEFT RAIL: Mission Operations ──────────────────────────── -->
+      <div id="leftShell">
+        <div class="rail-header">Mission Operations</div>
 
-      <div id="panelTargeting" class="hud-panel">
-        <div class="hud-title">TARGETING</div>
-        <div class="hud-row"><span class="hud-muted">STATUS</span><span id="hudStatus">FREE</span></div>
-        <div class="hud-row"><span class="hud-muted">TYPE</span><span id="hudType">---</span></div>
-        <div class="hud-row"><span class="hud-muted">NAME</span><span id="hudName">---</span></div>
-        <div class="hud-row"><span class="hud-muted">LON</span><span id="hudLon">---</span></div>
-        <div class="hud-row"><span class="hud-muted">LAT</span><span id="hudLat">---</span></div>
-        <div class="hud-row"><span class="hud-muted">ALT (m)</span><span id="hudAlt">---</span></div>
-        <div class="hud-row"><span class="hud-muted">SPD</span><span id="hudSpeed">---</span></div>
-      </div>
+        <div id="panelStatus" class="hud-panel">
+          <div class="hud-title">System Status</div>
+          <div class="hud-row"><span class="hud-muted">UPLINK</span><span>SECURE</span></div>
+          <div class="hud-row"><span class="hud-muted">DATALINK</span><span id="datalinkStatus">ACTIVE</span></div>
+          <div class="hud-row"><span class="hud-muted">CLOCK</span><span id="hudClock">--:--:--</span></div>
+          <div class="hud-row"><span class="hud-muted">SATS</span><span id="satCount">—</span></div>
+          <div class="hud-row"><span class="hud-muted">AIR</span><span id="flightCount">—</span></div>
+        </div>
 
-      <div id="panelInspect" class="hud-panel">
-        <div class="hud-title">INSPECT</div>
-        <div id="inspectBody">(click an asset)</div>
-      </div>
-
-      <div id="panelSensors" class="hud-panel">
-        <div class="hud-title">SENSOR ARRAY</div>
-        <div class="hud-row"><span class="hud-muted">MODE</span><span>STANDARD</span></div>
-        <div class="hud-btns">
-          <button class="hud-btn" type="button" data-mode="night">NIGHT VISION</button>
-          <button class="hud-btn" type="button" data-mode="thermal">THERMAL (FLIR)</button>
-          <button class="hud-btn active" type="button" data-mode="standard">STANDARD</button>
+        <div class="hud-panel">
+          <div class="hud-title">Feed Sources</div>
+          <div class="feed-list">
+            <div class="feed-item">
+              <span class="feed-dot"></span>
+              <span class="feed-label">SAT</span>
+              <span class="feed-status">LIVE · 15s</span>
+            </div>
+            <div class="feed-item">
+              <span class="feed-dot"></span>
+              <span class="feed-label">AIR</span>
+              <span class="feed-status">LIVE · 10s</span>
+            </div>
+            <div class="feed-item">
+              <span class="feed-dot"></span>
+              <span class="feed-label">CCTV</span>
+              <span class="feed-status">ACTIVE</span>
+            </div>
+            <div class="feed-item">
+              <span class="feed-dot dim"></span>
+              <span class="feed-label">ZONE</span>
+              <span class="feed-status">STANDBY</span>
+            </div>
+          </div>
         </div>
       </div>
+
+      <!-- ── CENTER: Scope Viewport ─────────────────────────────────── -->
+      <div id="centerShell">
+        <div id="viewportFrame">
+          <div id="viewportMask">
+            <div id="cesiumContainer"></div>
+          </div>
+          <div id="viewportScanlines"></div>
+          <div id="viewportVignette"></div>
+          <div id="viewportRing"></div>
+        </div>
+      </div>
+
+      <!-- ── RIGHT RAIL: Sensor Tuning ──────────────────────────────── -->
+      <div id="rightShell">
+        <div class="rail-header">Sensor Tuning</div>
+
+        <div id="targeting-panel" class="hud-panel">
+          <div class="hud-title">Targeting</div>
+
+          <div class="target-row">
+            <span class="target-label">STATUS</span>
+            <span id="target-status" class="target-value is-free">FREE</span>
+          </div>
+          <div class="target-row">
+            <span class="target-label">TYPE</span>
+            <span id="target-type" class="target-value">—</span>
+          </div>
+          <div class="target-row">
+            <span class="target-label">NAME</span>
+            <span id="target-name" class="target-value">—</span>
+          </div>
+          <div class="target-row">
+            <span class="target-label">LON</span>
+            <span id="target-lon" class="target-value">—</span>
+          </div>
+          <div class="target-row">
+            <span class="target-label">LAT</span>
+            <span id="target-lat" class="target-value">—</span>
+          </div>
+          <div class="target-row">
+            <span class="target-label">ALT</span>
+            <span id="target-alt" class="target-value">—</span>
+          </div>
+          <div class="target-row">
+            <span class="target-label">SPD</span>
+            <span id="target-spd" class="target-value">—</span>
+          </div>
+        </div>
+
+        <div class="hud-panel">
+          <div class="hud-title">Image Control</div>
+          <div class="slider-group">
+            <div class="slider-row">
+              <span class="slider-label">GAIN</span>
+              <input class="slider-track" type="range" min="0" max="100" value="72" />
+              <span class="slider-val">72</span>
+            </div>
+            <div class="slider-row">
+              <span class="slider-label">CONTRAST</span>
+              <input class="slider-track" type="range" min="0" max="100" value="58" />
+              <span class="slider-val">58</span>
+            </div>
+            <div class="slider-row">
+              <span class="slider-label">NOISE</span>
+              <input class="slider-track" type="range" min="0" max="100" value="24" />
+              <span class="slider-val">24</span>
+            </div>
+            <div class="slider-row">
+              <span class="slider-label">BLOOM</span>
+              <input class="slider-track" type="range" min="0" max="100" value="40" />
+              <span class="slider-val">40</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="panelInspect" class="hud-panel">
+          <div class="hud-title">Inspect</div>
+          <div id="inspectBody">(click an asset)</div>
+        </div>
+      </div>
+
+      <!-- ── BOTTOM DECK: Command Chips ─────────────────────────────── -->
+      <div id="bottomShell">
+        <div id="panelSensors">
+
+          <div class="deck-row">
+            <span class="deck-label">Location</span>
+            <div class="hud-btns">
+              <button class="deck-btn" type="button" data-preset="home">HOME</button>
+              <button class="deck-btn" type="button" data-preset="london">LONDON</button>
+              <button class="deck-btn" type="button" data-preset="austin">AUSTIN</button>
+              <button class="deck-btn" type="button" data-preset="tokyo">TOKYO</button>
+            </div>
+          </div>
+
+          <div class="deck-row">
+            <span class="deck-label">Mode</span>
+            <div class="hud-btns">
+              <button class="hud-btn active" type="button" data-mode="standard">NORMAL</button>
+              <button class="hud-btn" type="button" data-mode="night">NVG</button>
+              <button class="hud-btn" type="button" data-mode="thermal">FLIR</button>
+              <button class="hud-btn" type="button" data-mode="thermal">THERMAL</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
     </div>
 
     <script>
@@ -345,13 +686,27 @@
       updateHudClock();
       setInterval(updateHudClock, 250);
 
-      const hudLonEl = document.getElementById("hudLon");
-      const hudLatEl = document.getElementById("hudLat");
-      const hudStatusEl = document.getElementById("hudStatus");
-      const hudTypeEl = document.getElementById("hudType");
-      const hudNameEl = document.getElementById("hudName");
-      const hudAltEl = document.getElementById("hudAlt");
-      const hudSpeedEl = document.getElementById("hudSpeed");
+      const targetingEls = {
+        status: document.getElementById("target-status"),
+        type: document.getElementById("target-type"),
+        name: document.getElementById("target-name"),
+        lon: document.getElementById("target-lon"),
+        lat: document.getElementById("target-lat"),
+        alt: document.getElementById("target-alt"),
+        spd: document.getElementById("target-spd"),
+      };
+
+      function fmtCoord(value) {
+        return Number.isFinite(value) ? value.toFixed(4) : "—";
+      }
+
+      function fmtMeters(value) {
+        return Number.isFinite(value) ? `${Math.round(value)} m` : "—";
+      }
+
+      function fmtSpeed(value) {
+        return Number.isFinite(value) ? `${Math.round(value)} m/s` : "N/A";
+      }
 
       function getPropValue(valueOrProp) {
         if (valueOrProp && typeof valueOrProp.getValue === "function") return valueOrProp.getValue();
@@ -363,49 +718,32 @@
         return getPropValue(entity.properties.kind);
       }
 
-      function setTargetingUnlocked(lon, lat) {
-        if (hudStatusEl) hudStatusEl.textContent = "FREE";
-        if (hudTypeEl) hudTypeEl.textContent = "---";
-        if (hudNameEl) hudNameEl.textContent = "---";
-        if (hudAltEl) hudAltEl.textContent = "---";
-        if (hudSpeedEl) hudSpeedEl.textContent = "---";
-        if (hudLonEl) hudLonEl.textContent = typeof lon === "number" ? lon.toFixed(5) : "---";
-        if (hudLatEl) hudLatEl.textContent = typeof lat === "number" ? lat.toFixed(5) : "---";
+      function setTargetingFree(lon, lat) {
+        if (!targetingEls.status) return;
+        targetingEls.status.textContent = "FREE";
+        targetingEls.status.classList.remove("is-locked");
+        targetingEls.status.classList.add("is-free");
+
+        if (targetingEls.type) targetingEls.type.textContent = "—";
+        if (targetingEls.name) targetingEls.name.textContent = "—";
+        if (targetingEls.lon) targetingEls.lon.textContent = fmtCoord(lon);
+        if (targetingEls.lat) targetingEls.lat.textContent = fmtCoord(lat);
+        if (targetingEls.alt) targetingEls.alt.textContent = "—";
+        if (targetingEls.spd) targetingEls.spd.textContent = "—";
       }
 
-      function setTargetingLocked(entity) {
-        const kind = getEntityKind(entity);
-        const props = entity && entity.properties ? entity.properties : null;
-        if (!props || (kind !== "satellite" && kind !== "aircraft")) return;
+      function setTargetingLocked(target) {
+        if (!targetingEls.status) return;
+        targetingEls.status.textContent = "LOCKED";
+        targetingEls.status.classList.remove("is-free");
+        targetingEls.status.classList.add("is-locked");
 
-        if (hudStatusEl) hudStatusEl.textContent = "LOCKED";
-
-        const lon = getPropValue(props.lon);
-        const lat = getPropValue(props.lat);
-        const altM = getPropValue(props.alt_m);
-
-        let name = "---";
-        let speedMps = null;
-        let type = "---";
-
-        if (kind === "satellite") {
-          type = "SATELLITE";
-          name = getPropValue(props.name) || "---";
-        } else {
-          type = "AIRCRAFT";
-          name = (getPropValue(props.callsign) || "").trim() || getPropValue(props.icao24) || "---";
-          const v = getPropValue(props.speed_mps);
-          speedMps = typeof v === "number" ? v : null;
-        }
-
-        if (hudTypeEl) hudTypeEl.textContent = type;
-        if (hudNameEl) hudNameEl.textContent = String(name);
-        if (hudLonEl) hudLonEl.textContent = typeof lon === "number" ? lon.toFixed(5) : "---";
-        if (hudLatEl) hudLatEl.textContent = typeof lat === "number" ? lat.toFixed(5) : "---";
-        if (hudAltEl) hudAltEl.textContent = typeof altM === "number" ? String(Math.round(altM)) : "---";
-        if (hudSpeedEl) {
-          hudSpeedEl.textContent = typeof speedMps === "number" ? `${speedMps.toFixed(1)} m/s` : "N/A";
-        }
+        if (targetingEls.type) targetingEls.type.textContent = target?.type ?? "—";
+        if (targetingEls.name) targetingEls.name.textContent = target?.name ?? "—";
+        if (targetingEls.lon) targetingEls.lon.textContent = fmtCoord(target?.lon);
+        if (targetingEls.lat) targetingEls.lat.textContent = fmtCoord(target?.lat);
+        if (targetingEls.alt) targetingEls.alt.textContent = fmtMeters(target?.alt);
+        if (targetingEls.spd) targetingEls.spd.textContent = fmtSpeed(target?.speed);
       }
 
       const LOCK_STYLES = {
@@ -432,12 +770,24 @@
       let lockedTarget = null;
       let lastMouseLonLat = { lon: null, lat: null };
 
+      function syncTargetingFromLockedTarget() {
+        if (!lockedTarget) return;
+        setTargetingLocked({
+          type: lockedTarget.type,
+          name: lockedTarget.name,
+          lon: lockedTarget.lon,
+          lat: lockedTarget.lat,
+          alt: lockedTarget.alt,
+          speed: lockedTarget.speed,
+        });
+      }
+
       function clearLockedTarget() {
         if (lockedTarget && lockedTarget.entity) {
           applyLockVisual(lockedTarget.entity, lockedTarget.kind, false);
         }
         lockedTarget = null;
-        setTargetingUnlocked(lastMouseLonLat.lon, lastMouseLonLat.lat);
+        setTargetingFree(lastMouseLonLat.lon, lastMouseLonLat.lat);
       }
 
       function lockTargetToEntity(entity) {
@@ -452,9 +802,46 @@
         if (kind === "satellite") key = getPropValue(entity.properties.name);
         if (kind === "aircraft") key = getPropValue(entity.properties.icao24);
 
-        lockedTarget = { kind, key, entity };
+        lockedTarget = {
+          kind,
+          key,
+          entity,
+          type: kind === "satellite" ? "SATELLITE" : "AIRCRAFT",
+          name: "—",
+          lon: NaN,
+          lat: NaN,
+          alt: NaN,
+          speed: kind === "satellite" ? null : NaN,
+        };
         applyLockVisual(entity, kind, true);
-        setTargetingLocked(entity);
+
+        // Explicit target-object update (stable HUD contract)
+        const props = entity && entity.properties ? entity.properties : null;
+        if (props) {
+          const lon = getPropValue(props.lon);
+          const lat = getPropValue(props.lat);
+          const altM = getPropValue(props.alt_m);
+
+          if (kind === "satellite") {
+            lockedTarget.type = "SATELLITE";
+            lockedTarget.name = getPropValue(props.name) || "—";
+            lockedTarget.lon = lon;
+            lockedTarget.lat = lat;
+            lockedTarget.alt = altM;
+            lockedTarget.speed = null;
+            syncTargetingFromLockedTarget();
+          } else {
+            const name = (getPropValue(props.callsign) || "").trim() || getPropValue(props.icao24) || "—";
+            const speedMps = getPropValue(props.speed_mps);
+            lockedTarget.type = "AIRCRAFT";
+            lockedTarget.name = name;
+            lockedTarget.lon = lon;
+            lockedTarget.lat = lat;
+            lockedTarget.alt = altM;
+            lockedTarget.speed = typeof speedMps === "number" ? speedMps : NaN;
+            syncTargetingFromLockedTarget();
+          }
+        }
       }
 
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
@@ -465,7 +852,7 @@
         );
         if (!cartesian) {
           lastMouseLonLat = { lon: null, lat: null };
-          if (!lockedTarget) setTargetingUnlocked(null, null);
+          if (!lockedTarget) setTargetingFree(null, null);
           return;
         }
 
@@ -473,7 +860,7 @@
         const lon = Cesium.Math.toDegrees(carto.longitude);
         const lat = Cesium.Math.toDegrees(carto.latitude);
         lastMouseLonLat = { lon, lat };
-        if (!lockedTarget) setTargetingUnlocked(lon, lat);
+        if (!lockedTarget) setTargetingFree(lon, lat);
       }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
 
       // Click-to-inspect behavior (satellites + CCTV zone)
@@ -617,7 +1004,13 @@
           lockedTarget.key === f.icao24 &&
           lockedTarget.entity === entity
         ) {
-          setTargetingLocked(entity);
+          lockedTarget.type = "AIRCRAFT";
+          lockedTarget.name = labelText;
+          lockedTarget.lon = f.lon;
+          lockedTarget.lat = f.lat;
+          lockedTarget.alt = alt;
+          lockedTarget.speed = typeof f.velocity_mps === "number" ? f.velocity_mps : NaN;
+          syncTargetingFromLockedTarget();
         }
       }
 
@@ -714,7 +1107,13 @@
           lockedTarget.key === s.name &&
           lockedTarget.entity === entity
         ) {
-          setTargetingLocked(entity);
+          lockedTarget.type = "SATELLITE";
+          lockedTarget.name = s.name;
+          lockedTarget.lon = s.lon;
+          lockedTarget.lat = s.lat;
+          lockedTarget.alt = s.alt;
+          lockedTarget.speed = null;
+          syncTargetingFromLockedTarget();
         }
       }
 
@@ -869,36 +1268,137 @@
       thermalFlirStage.enabled = false;
 
       // Sensor mode toggles
-      const sensorButtons = Array.from(document.querySelectorAll("#panelSensors .hud-btn"));
-
+      // Using event delegation on the container so wiring can never miss
+      // a button due to querySelectorAll snapshot timing.
       function setSensorMode(mode) {
-        if (mode === "night") {
-          nightVisionCrtStage.enabled = true;
-          thermalFlirStage.enabled = false;
-        } else if (mode === "thermal") {
-          nightVisionCrtStage.enabled = false;
-          thermalFlirStage.enabled = true;
-        } else {
-          // STANDARD
-          nightVisionCrtStage.enabled = false;
-          thermalFlirStage.enabled = false;
-        }
+        // Explicit stage mapping — never derived from button text.
+        const modeMap = {
+          night:   { night: true,  thermal: false },
+          thermal: { night: false, thermal: true  },
+          standard:{ night: false, thermal: false },
+        };
+        const settings = modeMap[mode] ?? modeMap.standard;
 
-        for (const btn of sensorButtons) {
-          const isActive = btn.getAttribute("data-mode") === mode;
-          btn.classList.toggle("active", isActive);
-        }
+        nightVisionCrtStage.enabled = settings.night;
+        thermalFlirStage.enabled    = settings.thermal;
+
+        console.log(
+          `[sensor] mode=${mode}`,
+          `| nightVision.enabled=${nightVisionCrtStage.enabled}`,
+          `| thermalFlir.enabled=${thermalFlirStage.enabled}`
+        );
+
+        // Sync active class on all mode chips via live query (never stale).
+        document
+          .querySelectorAll("#panelSensors [data-mode]")
+          .forEach((btn) => {
+            btn.classList.toggle("active", btn.getAttribute("data-mode") === mode);
+          });
       }
 
-      for (const btn of sensorButtons) {
-        btn.addEventListener("click", () => {
-          const mode = btn.getAttribute("data-mode") || "standard";
-          setSensorMode(mode);
-        });
-      }
+      // Delegate clicks from the deck container — handles any DOM ordering.
+      document.getElementById("panelSensors").addEventListener("click", (e) => {
+        const btn = e.target.closest("[data-mode]");
+        if (!btn) return;
+        const mode = btn.getAttribute("data-mode") || "standard";
+        setSensorMode(mode);
+      });
 
       // Default to STANDARD for visibility.
       setSensorMode("standard");
+
+      // --- DATALINK status feedback ---
+      function setDatalinkStatus(text, isAmber, revertAfterMs) {
+        const el = document.getElementById("datalinkStatus");
+        if (!el) return;
+        el.textContent = text;
+        if (isAmber) {
+          el.style.color = "var(--c-amber)";
+          el.style.textShadow = "0 0 7px rgba(255,176,0,0.55)";
+        } else {
+          el.style.color = "";
+          el.style.textShadow = "";
+        }
+        if (revertAfterMs) {
+          setTimeout(() => setDatalinkStatus("ACTIVE", false), revertAfterMs);
+        }
+      }
+
+      function setDatalinkSecure() {
+        const el = document.getElementById("datalinkStatus");
+        if (!el) return;
+        el.textContent = "SECURE";
+        el.style.color = "var(--c-green)";
+        el.style.textShadow = "0 0 7px rgba(0,255,106,0.45)";
+      }
+
+      // --- Location preset coordinate table ---
+      const LOCATION_PRESETS = {
+        home:   { lon: cctvLon,  lat: cctvLat,  alt: 2500.0, pitch: -50 },
+        london: { lon: -0.0754,  lat: 51.5055,  alt: 1500.0, pitch: -45 },
+        austin: { lon: -97.7431, lat: 30.2672,  alt: 2000.0, pitch: -45 },
+        tokyo:  { lon: 139.7013, lat: 35.6581,  alt: 1800.0, pitch: -45 },
+      };
+
+      function setActiveLocationChip(key) {
+        document.querySelectorAll("#panelSensors .deck-btn[data-preset]").forEach((btn) => {
+          btn.classList.toggle("active", btn.getAttribute("data-preset") === key);
+        });
+      }
+
+      function flyToPreset(preset) {
+        const coords = LOCATION_PRESETS[preset];
+        if (!coords) {
+          viewer.camera.flyHome(1.2);
+          return;
+        }
+
+        setDatalinkStatus("RECONFIGURING SENSOR...", true);
+        setActiveLocationChip(preset);
+
+        viewer.camera.flyTo({
+          destination: Cesium.Cartesian3.fromDegrees(coords.lon, coords.lat, coords.alt),
+          orientation: {
+            heading: Cesium.Math.toRadians(0.0),
+            pitch: Cesium.Math.toRadians(coords.pitch),
+            roll: 0.0,
+          },
+          duration: 3.0,
+          complete: function () {
+            setDatalinkSecure();
+          },
+        });
+      }
+
+      // --- Canonical home flyTo (delegates to preset table) ---
+      function flyToHome() {
+        flyToPreset("home");
+      }
+
+      // Override Cesium's native home button — fly to CCTV-01 instead of globe.
+      if (viewer.homeButton) {
+        viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function (e) {
+          e.cancel = true;
+          flyToHome();
+        });
+      }
+
+      // Delegate location preset clicks — event delegation, never stale.
+      document.getElementById("panelSensors").addEventListener("click", (e) => {
+        const btn = e.target.closest(".deck-btn[data-preset]");
+        if (!btn) return;
+        flyToPreset(btn.getAttribute("data-preset") || "home");
+      });
+
+      // Mark HOME as active on initial load.
+      setActiveLocationChip("home");
+
+      // After the CSS grid layout has settled, force Cesium to redraw to the
+      // actual container size (avoids a stale tiny-canvas from init-time size).
+      requestAnimationFrame(() => {
+        viewer.resize();
+        console.log("[layout] viewer.resize() called after layout settled");
+      });
     </script>
   </body>
 </html>
