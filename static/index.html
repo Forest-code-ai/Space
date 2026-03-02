@@ -113,6 +113,19 @@
         top: 14px;
       }
 
+      #panelInspect {
+        right: 14px;
+        top: 170px;
+        width: 360px;
+        display: none;
+      }
+
+      #inspectBody {
+        font-size: 13px;
+        line-height: 1.35;
+        white-space: pre-wrap;
+      }
+
       #panelSensors {
         left: 14px;
         bottom: 14px;
@@ -162,8 +175,17 @@
 
       <div id="panelTargeting" class="hud-panel">
         <div class="hud-title">TARGETING</div>
+        <div class="hud-row"><span class="hud-muted">TYPE</span><span id="hudType">---</span></div>
+        <div class="hud-row"><span class="hud-muted">NAME</span><span id="hudName">---</span></div>
         <div class="hud-row"><span class="hud-muted">LON</span><span id="hudLon">---</span></div>
         <div class="hud-row"><span class="hud-muted">LAT</span><span id="hudLat">---</span></div>
+        <div class="hud-row"><span class="hud-muted">ALT (m)</span><span id="hudAlt">---</span></div>
+        <div class="hud-row"><span class="hud-muted">SPD</span><span id="hudSpeed">---</span></div>
+      </div>
+
+      <div id="panelInspect" class="hud-panel">
+        <div class="hud-title">INSPECT</div>
+        <div id="inspectBody">(click an asset)</div>
       </div>
 
       <div id="panelSensors" class="hud-panel">
@@ -225,8 +247,9 @@
         44.3125
       );
 
-      viewer.entities.add({
+      const cctvRectEntity = viewer.entities.add({
         id: "cctv:01:rect",
+        name: "CCTV-01: HUNTER/BETHUNE LIVE",
         rectangle: {
           coordinates: cctvRect,
           material: cctvFillMaterial,
@@ -238,6 +261,18 @@
       const cctvLon = -78.3218;
       const cctvLat = 44.3045;
       const cctvTopAltM = 220.0;
+
+      cctvRectEntity.properties = new Cesium.PropertyBag({
+        kind: "cctv",
+        name: "CCTV-01: HUNTER/BETHUNE LIVE",
+        centerLon: cctvLon,
+        centerLat: cctvLat,
+        status: "ACTIVE",
+        west: Cesium.Math.toDegrees(cctvRect.west),
+        east: Cesium.Math.toDegrees(cctvRect.east),
+        south: Cesium.Math.toDegrees(cctvRect.south),
+        north: Cesium.Math.toDegrees(cctvRect.north),
+      });
 
       // Startup camera target for quick CCTV verification.
       viewer.camera.flyTo({
@@ -280,6 +315,20 @@
       });
 
       // --- HUD wiring ---
+      const panelInspect = document.getElementById("panelInspect");
+      const inspectBody = document.getElementById("inspectBody");
+
+      function showInspect(text) {
+        if (!panelInspect || !inspectBody) return;
+        inspectBody.textContent = text;
+        panelInspect.style.display = "block";
+      }
+
+      function hideInspect() {
+        if (!panelInspect) return;
+        panelInspect.style.display = "none";
+      }
+
       function updateHudClock() {
         const el = document.getElementById("hudClock");
         if (!el) return;
@@ -297,6 +346,112 @@
 
       const hudLonEl = document.getElementById("hudLon");
       const hudLatEl = document.getElementById("hudLat");
+      const hudTypeEl = document.getElementById("hudType");
+      const hudNameEl = document.getElementById("hudName");
+      const hudAltEl = document.getElementById("hudAlt");
+      const hudSpeedEl = document.getElementById("hudSpeed");
+
+      function getPropValue(valueOrProp) {
+        if (valueOrProp && typeof valueOrProp.getValue === "function") return valueOrProp.getValue();
+        return valueOrProp;
+      }
+
+      function getEntityKind(entity) {
+        if (!entity || !entity.properties) return null;
+        return getPropValue(entity.properties.kind);
+      }
+
+      function setTargetingUnlocked(lon, lat) {
+        if (hudTypeEl) hudTypeEl.textContent = "---";
+        if (hudNameEl) hudNameEl.textContent = "---";
+        if (hudAltEl) hudAltEl.textContent = "---";
+        if (hudSpeedEl) hudSpeedEl.textContent = "---";
+        if (hudLonEl) hudLonEl.textContent = typeof lon === "number" ? lon.toFixed(5) : "---";
+        if (hudLatEl) hudLatEl.textContent = typeof lat === "number" ? lat.toFixed(5) : "---";
+      }
+
+      function setTargetingLocked(entity) {
+        const kind = getEntityKind(entity);
+        const props = entity && entity.properties ? entity.properties : null;
+        if (!props || (kind !== "satellite" && kind !== "aircraft")) return;
+
+        const lon = getPropValue(props.lon);
+        const lat = getPropValue(props.lat);
+        const altM = getPropValue(props.alt_m);
+
+        let name = "---";
+        let speedMps = null;
+        let type = "---";
+
+        if (kind === "satellite") {
+          type = "SATELLITE";
+          name = getPropValue(props.name) || "---";
+        } else {
+          type = "AIRCRAFT";
+          name = (getPropValue(props.callsign) || "").trim() || getPropValue(props.icao24) || "---";
+          const v = getPropValue(props.speed_mps);
+          speedMps = typeof v === "number" ? v : null;
+        }
+
+        if (hudTypeEl) hudTypeEl.textContent = type;
+        if (hudNameEl) hudNameEl.textContent = String(name);
+        if (hudLonEl) hudLonEl.textContent = typeof lon === "number" ? lon.toFixed(5) : "---";
+        if (hudLatEl) hudLatEl.textContent = typeof lat === "number" ? lat.toFixed(5) : "---";
+        if (hudAltEl) hudAltEl.textContent = typeof altM === "number" ? String(Math.round(altM)) : "---";
+        if (hudSpeedEl) {
+          hudSpeedEl.textContent = typeof speedMps === "number" ? `${speedMps.toFixed(1)} m/s` : "N/A";
+        }
+      }
+
+      const LOCK_STYLES = {
+        satellite: {
+          base: { pixelSize: 8, outlineColor: Cesium.Color.WHITE, outlineWidth: 1 },
+          locked: { pixelSize: 11, outlineColor: Cesium.Color.LIME.withAlpha(0.98), outlineWidth: 3 },
+        },
+        aircraft: {
+          base: { pixelSize: 6, outlineColor: Cesium.Color.RED, outlineWidth: 1 },
+          locked: { pixelSize: 9, outlineColor: Cesium.Color.LIME.withAlpha(0.98), outlineWidth: 3 },
+        },
+      };
+
+      function applyLockVisual(entity, kind, locked) {
+        if (!entity || !entity.point) return;
+        const styles = LOCK_STYLES[kind];
+        if (!styles) return;
+        const s = locked ? styles.locked : styles.base;
+        entity.point.pixelSize = s.pixelSize;
+        entity.point.outlineColor = s.outlineColor;
+        entity.point.outlineWidth = s.outlineWidth;
+      }
+
+      let lockedTarget = null;
+      let lastMouseLonLat = { lon: null, lat: null };
+
+      function clearLockedTarget() {
+        if (lockedTarget && lockedTarget.entity) {
+          applyLockVisual(lockedTarget.entity, lockedTarget.kind, false);
+        }
+        lockedTarget = null;
+        setTargetingUnlocked(lastMouseLonLat.lon, lastMouseLonLat.lat);
+      }
+
+      function lockTargetToEntity(entity) {
+        const kind = getEntityKind(entity);
+        if (kind !== "satellite" && kind !== "aircraft") return;
+
+        if (lockedTarget && lockedTarget.entity) {
+          applyLockVisual(lockedTarget.entity, lockedTarget.kind, false);
+        }
+
+        let key = null;
+        if (kind === "satellite") key = getPropValue(entity.properties.name);
+        if (kind === "aircraft") key = getPropValue(entity.properties.icao24);
+
+        lockedTarget = { kind, key, entity };
+        applyLockVisual(entity, kind, true);
+        setTargetingLocked(entity);
+      }
+
       const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
       handler.setInputAction((movement) => {
         const cartesian = viewer.camera.pickEllipsoid(
@@ -304,17 +459,93 @@
           viewer.scene.globe.ellipsoid
         );
         if (!cartesian) {
-          if (hudLonEl) hudLonEl.textContent = "---";
-          if (hudLatEl) hudLatEl.textContent = "---";
+          lastMouseLonLat = { lon: null, lat: null };
+          if (!lockedTarget) setTargetingUnlocked(null, null);
           return;
         }
 
         const carto = Cesium.Cartographic.fromCartesian(cartesian);
         const lon = Cesium.Math.toDegrees(carto.longitude);
         const lat = Cesium.Math.toDegrees(carto.latitude);
-        if (hudLonEl) hudLonEl.textContent = lon.toFixed(5);
-        if (hudLatEl) hudLatEl.textContent = lat.toFixed(5);
+        lastMouseLonLat = { lon, lat };
+        if (!lockedTarget) setTargetingUnlocked(lon, lat);
       }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+      // Click-to-inspect behavior (satellites + CCTV zone)
+      handler.setInputAction((click) => {
+        const picked = viewer.scene.pick(click.position);
+        if (!Cesium.defined(picked) || !picked.id) {
+          // Clicking empty space clears the lock and returns TARGETING to mouse coords.
+          const cartesian = viewer.camera.pickEllipsoid(
+            click.position,
+            viewer.scene.globe.ellipsoid
+          );
+          if (cartesian) {
+            const carto = Cesium.Cartographic.fromCartesian(cartesian);
+            lastMouseLonLat = {
+              lon: Cesium.Math.toDegrees(carto.longitude),
+              lat: Cesium.Math.toDegrees(carto.latitude),
+            };
+          }
+          clearLockedTarget();
+          hideInspect();
+          return;
+        }
+
+        const entity = picked.id;
+        const props = entity.properties;
+        if (!props) {
+          hideInspect();
+          return;
+        }
+
+        const kind = getEntityKind(entity);
+        if (kind === "satellite") {
+          lockTargetToEntity(entity);
+          const name = getPropValue(props.name);
+          const lat = getPropValue(props.lat);
+          const lon = getPropValue(props.lon);
+          const alt = getPropValue(props.alt_m);
+          if (
+            typeof name === "string" &&
+            typeof lat === "number" &&
+            typeof lon === "number" &&
+            typeof alt === "number"
+          ) {
+            showInspect(
+              `SATELLITE\nNAME: ${name}\nLAT: ${lat.toFixed(5)}\nLON: ${lon.toFixed(5)}\nALT (m): ${Math.round(alt)}`
+            );
+          }
+          return;
+        }
+
+        if (kind === "aircraft") {
+          lockTargetToEntity(entity);
+          hideInspect();
+          return;
+        }
+
+        if (kind === "cctv") {
+          const name = getPropValue(props.name);
+          const centerLat = getPropValue(props.centerLat);
+          const centerLon = getPropValue(props.centerLon);
+          const status = getPropValue(props.status);
+          if (
+            typeof name === "string" &&
+            typeof centerLat === "number" &&
+            typeof centerLon === "number" &&
+            typeof status === "string"
+          ) {
+            showInspect(
+              `CCTV ZONE\nNAME: ${name}\nCENTER: ${centerLat.toFixed(5)}, ${centerLon.toFixed(5)}\nSTATUS: ${status}`
+            );
+          }
+          // Don't disturb any existing lock if user clicks the CCTV zone.
+          return;
+        }
+
+        hideInspect();
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
       // --- Live flight data (backend proxy) ---
       const flightEntitiesByIcao24 = new Map();
@@ -354,11 +585,47 @@
           entity.position = position;
           entity.label.text = labelText;
         }
+
+        if (!entity.properties) {
+          entity.properties = new Cesium.PropertyBag({
+            kind: "aircraft",
+            icao24: f.icao24,
+            callsign: f.callsign || "",
+            lat: f.lat,
+            lon: f.lon,
+            alt_m: alt,
+            speed_mps: typeof f.velocity_mps === "number" ? f.velocity_mps : null,
+          });
+        } else {
+          entity.properties.kind = "aircraft";
+          entity.properties.icao24 = f.icao24;
+          entity.properties.callsign = f.callsign || "";
+          entity.properties.lat = f.lat;
+          entity.properties.lon = f.lon;
+          entity.properties.alt_m = alt;
+          entity.properties.speed_mps = typeof f.velocity_mps === "number" ? f.velocity_mps : null;
+        }
+
+        if (
+          lockedTarget &&
+          lockedTarget.kind === "aircraft" &&
+          lockedTarget.key === f.icao24 &&
+          lockedTarget.entity === entity
+        ) {
+          setTargetingLocked(entity);
+        }
       }
 
       function removeStaleFlights(liveIcao24Set) {
         for (const [icao24, entity] of flightEntitiesByIcao24.entries()) {
           if (!liveIcao24Set.has(icao24)) {
+            if (
+              lockedTarget &&
+              lockedTarget.kind === "aircraft" &&
+              lockedTarget.key === icao24
+            ) {
+              clearLockedTarget();
+            }
             viewer.entities.remove(entity);
             flightEntitiesByIcao24.delete(icao24);
           }
@@ -417,16 +684,45 @@
               distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 800000.0),
             },
           });
+
+          entity.properties = new Cesium.PropertyBag({
+            kind: "satellite",
+            name: s.name,
+            lat: s.lat,
+            lon: s.lon,
+            alt_m: s.alt,
+          });
+
           satelliteEntitiesByName.set(s.name, entity);
         } else {
           entity.position = position;
           entity.label.text = s.name;
+
+          entity.properties.lat = s.lat;
+          entity.properties.lon = s.lon;
+          entity.properties.alt_m = s.alt;
+        }
+
+        if (
+          lockedTarget &&
+          lockedTarget.kind === "satellite" &&
+          lockedTarget.key === s.name &&
+          lockedTarget.entity === entity
+        ) {
+          setTargetingLocked(entity);
         }
       }
 
       function removeStaleSatellites(liveNameSet) {
         for (const [name, entity] of satelliteEntitiesByName.entries()) {
           if (!liveNameSet.has(name)) {
+            if (
+              lockedTarget &&
+              lockedTarget.kind === "satellite" &&
+              lockedTarget.key === name
+            ) {
+              clearLockedTarget();
+            }
             viewer.entities.remove(entity);
             satelliteEntitiesByName.delete(name);
           }
