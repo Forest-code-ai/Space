@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
@@ -7,6 +9,7 @@ from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from sgp4.api import Satrec, jday
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_DIR.parent
@@ -87,3 +90,125 @@ def get_flights() -> dict:
         "bbox": params,
         "flights": flights,
     }
+
+
+def _parse_tle(text: str) -> list[tuple[str, str, str]]:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    triples: list[tuple[str, str, str]] = []
+    i = 0
+    while i + 2 < len(lines):
+        name = lines[i]
+        l1 = lines[i + 1]
+        l2 = lines[i + 2]
+        if l1.startswith("1 ") and l2.startswith("2 "):
+            triples.append((name, l1, l2))
+            i += 3
+        else:
+            i += 1
+    return triples
+
+
+def _gmst_radians(jd_ut1: float) -> float:
+    # Approx GMST from Vallado; sufficient for visualization.
+    t = (jd_ut1 - 2451545.0) / 36525.0
+    gmst_deg = (
+        280.46061837
+        + 360.98564736629 * (jd_ut1 - 2451545.0)
+        + 0.000387933 * t * t
+        - (t * t * t) / 38710000.0
+    )
+    gmst_deg = gmst_deg % 360.0
+    return math.radians(gmst_deg)
+
+
+def _teme_to_ecef(r_teme_m: tuple[float, float, float], jd_ut1: float) -> tuple[float, float, float]:
+    # Ignore polar motion and equation-of-equinoxes; z-rotation by GMST.
+    x, y, z = r_teme_m
+    theta = _gmst_radians(jd_ut1)
+    c = math.cos(theta)
+    s = math.sin(theta)
+    x_ecef = c * x + s * y
+    y_ecef = -s * x + c * y
+    return (x_ecef, y_ecef, z)
+
+
+def _ecef_to_geodetic_wgs84(r_ecef_m: tuple[float, float, float]) -> tuple[float, float, float]:
+    # Convert ECEF (m) to geodetic lat/lon (deg) and altitude (m) on WGS84.
+    x, y, z = r_ecef_m
+    a = 6378137.0
+    f = 1.0 / 298.257223563
+    e2 = f * (2.0 - f)
+
+    lon = math.atan2(y, x)
+    p = math.hypot(x, y)
+    if p < 1e-9:
+        lat = math.copysign(math.pi / 2.0, z)
+        alt = abs(z) - a * (1.0 - f)
+        return (math.degrees(lat), math.degrees(lon), alt)
+
+    lat = math.atan2(z, p * (1.0 - e2))
+    for _ in range(6):
+        sin_lat = math.sin(lat)
+        n = a / math.sqrt(1.0 - e2 * sin_lat * sin_lat)
+        alt = p / math.cos(lat) - n
+        lat_next = math.atan2(z, p * (1.0 - e2 * (n / (n + alt))))
+        if abs(lat_next - lat) < 1e-12:
+            lat = lat_next
+            break
+        lat = lat_next
+
+    sin_lat = math.sin(lat)
+    n = a / math.sqrt(1.0 - e2 * sin_lat * sin_lat)
+    alt = p / math.cos(lat) - n
+    return (math.degrees(lat), math.degrees(lon), alt)
+
+
+@app.get("/api/satellites")
+def get_satellites() -> list[dict]:
+    url = "https://celestrak.org/NORAD/elements/gp.php"
+    params = {"GROUP": "visual", "FORMAT": "tle"}
+
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"CelesTrak request failed: {exc}") from exc
+
+    triples = _parse_tle(response.text)
+
+    now = datetime.now(timezone.utc)
+    jd, fr = jday(
+        now.year,
+        now.month,
+        now.day,
+        now.hour,
+        now.minute,
+        now.second + now.microsecond / 1_000_000.0,
+    )
+    jd_ut1 = jd + fr
+
+    sats: list[dict] = []
+    for name, l1, l2 in triples:
+        try:
+            sat = Satrec.twoline2rv(l1, l2)
+            err, r_km, _v_km_s = sat.sgp4(jd, fr)
+        except Exception:
+            continue
+
+        if err != 0:
+            continue
+
+        r_teme_m = (r_km[0] * 1000.0, r_km[1] * 1000.0, r_km[2] * 1000.0)
+        r_ecef_m = _teme_to_ecef(r_teme_m, jd_ut1)
+        lat, lon, alt_m = _ecef_to_geodetic_wgs84(r_ecef_m)
+
+        sats.append(
+            {
+                "name": name,
+                "lat": lat,
+                "lon": lon,
+                "alt": alt_m,
+            }
+        )
+
+    return sats

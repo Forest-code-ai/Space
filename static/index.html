@@ -300,6 +300,72 @@
       pollFlightsOnce();
       setInterval(pollFlightsOnce, 10_000);
 
+      // --- Live satellite data (backend proxy) ---
+      const satelliteEntitiesByName = new Map();
+
+      function upsertSatelliteEntity(s) {
+        const id = `sat:${s.name}`;
+        const position = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, s.alt);
+
+        let entity = satelliteEntitiesByName.get(s.name);
+        if (!entity) {
+          entity = viewer.entities.add({
+            id,
+            position,
+            point: {
+              color: Cesium.Color.WHITE.withAlpha(0.98),
+              pixelSize: 8,
+              outlineColor: Cesium.Color.WHITE,
+              outlineWidth: 1,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+              text: s.name,
+              font: "13px monospace",
+              fillColor: Cesium.Color.WHITE,
+              showBackground: true,
+              backgroundColor: Cesium.Color.BLACK.withAlpha(0.25),
+              pixelOffset: new Cesium.Cartesian2(10, -10),
+              horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          });
+          satelliteEntitiesByName.set(s.name, entity);
+        } else {
+          entity.position = position;
+          entity.label.text = s.name;
+        }
+      }
+
+      function removeStaleSatellites(liveNameSet) {
+        for (const [name, entity] of satelliteEntitiesByName.entries()) {
+          if (!liveNameSet.has(name)) {
+            viewer.entities.remove(entity);
+            satelliteEntitiesByName.delete(name);
+          }
+        }
+      }
+
+      async function pollSatellitesOnce() {
+        const resp = await fetch("/api/satellites", { cache: "no-store" });
+        if (!resp.ok) return;
+        const sats = await resp.json();
+        if (!Array.isArray(sats)) return;
+
+        const live = new Set();
+        for (const s of sats) {
+          if (!s || typeof s.name !== "string") continue;
+          if (typeof s.lon !== "number" || typeof s.lat !== "number" || typeof s.alt !== "number") continue;
+          live.add(s.name);
+          upsertSatelliteEntity(s);
+        }
+        removeStaleSatellites(live);
+      }
+
+      pollSatellitesOnce();
+      setInterval(pollSatellitesOnce, 15_000);
+
       // Military surveillance aesthetic: night vision phosphor + vignette + grain + CRT scanlines.
       const nightVisionCrtStage = new Cesium.PostProcessStage({
         name: "nightVisionCrt",
