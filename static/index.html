@@ -152,21 +152,6 @@
   <body>
     <div id="cesiumContainer"></div>
 
-    <video
-      id="cctv-feed"
-      autoplay
-      loop
-      crossorigin="anonymous"
-      muted
-      playsinline
-      style="display: none"
-    >
-      <source
-        src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-        type="video/mp4"
-      />
-    </video>
-
     <div id="hud" aria-hidden="true">
       <div id="panelStatus" class="hud-panel">
         <div class="hud-title">SYSTEM STATUS</div>
@@ -203,41 +188,67 @@
         sceneModePicker: false,
         navigationHelpButton: false,
         fullscreenButton: false,
-        imageryProvider: new Cesium.OpenStreetMapImageryProvider({
-          url: "https://a.tile.openstreetmap.org/",
-        }),
+        // We'll force the imagery layers right after init for reliability.
       });
 
       viewer.scene.globe.enableLighting = false;
 
-      // --- CCTV feed projection (placeholder video) ---
-      const cctvVideo = document.getElementById("cctv-feed");
-      if (cctvVideo) {
-        // Autoplay should work because video is muted; ignore failures.
-        cctvVideo.play().catch(() => {});
-      }
+      // --- Guaranteed visible base imagery (OSM) ---
+      // 1) Remove any existing layers (including defaults)
+      viewer.imageryLayers.removeAll(true);
+      // 2) Add explicit OpenStreetMap imagery
+      viewer.imageryLayers.addImageryProvider(
+        new Cesium.OpenStreetMapImageryProvider({
+          url: "https://tile.openstreetmap.org/",
+        })
+      );
+
+      // --- CCTV sensor zone (placeholder material) ---
+      // (We intentionally avoid a remote MP4 here to prevent CORS/black-texture issues.)
+      const cctvFillMaterial = new Cesium.ColorMaterialProperty(
+        new Cesium.CallbackProperty((time) => {
+          const t = Cesium.JulianDate.toDate(time).getTime() / 1000.0;
+          // Subtle pulse to suggest an active scan zone.
+          const pulse = 0.5 + 0.5 * Math.sin(t * 2.0);
+          const alpha = 0.16 + pulse * 0.06;
+          return Cesium.Color.fromCssColorString("#003100").withAlpha(alpha);
+        }, false)
+      );
+      const cctvOutlineColor = Cesium.Color.LIME.withAlpha(0.95);
 
       // Hunter St. & Bethune St. intersection (Peterborough, ON)
+      // Enlarged bounds for easier verification from mid-altitude.
       const cctvRect = Cesium.Rectangle.fromDegrees(
-        -78.3223,
-        44.3040,
-        -78.3213,
-        44.3050
+        -78.3318,
+        44.2965,
+        -78.3118,
+        44.3125
       );
 
       viewer.entities.add({
         id: "cctv:01:rect",
         rectangle: {
           coordinates: cctvRect,
-          material: new Cesium.ImageMaterialProperty({
-            image: cctvVideo,
-          }),
+          material: cctvFillMaterial,
+          outline: true,
+          outlineColor: cctvOutlineColor,
         },
       });
 
       const cctvLon = -78.3218;
       const cctvLat = 44.3045;
       const cctvTopAltM = 220.0;
+
+      // Startup camera target for quick CCTV verification.
+      viewer.camera.flyTo({
+        destination: Cesium.Cartesian3.fromDegrees(cctvLon, cctvLat, 2500.0),
+        orientation: {
+          heading: Cesium.Math.toRadians(0.0),
+          pitch: Cesium.Math.toRadians(-50.0),
+          roll: 0.0,
+        },
+        duration: 1.4,
+      });
 
       viewer.entities.add({
         id: "cctv:01:uplink",
@@ -402,6 +413,8 @@
               horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
               verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
               disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              // Reduce clutter: show satellite labels only when closer.
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 800000.0),
             },
           });
           satelliteEntitiesByName.set(s.name, entity);
@@ -446,7 +459,8 @@
           uniform sampler2D colorTexture;
           uniform vec2 viewport;
           uniform float time;
-          varying vec2 v_textureCoordinates;
+
+          in vec2 v_textureCoordinates;
 
           float hash(vec2 p) {
             // Cheap 2D hash
@@ -456,15 +470,18 @@
 
           void main() {
             vec2 uv = v_textureCoordinates;
-            vec4 base = texture2D(colorTexture, uv);
+            vec4 base = texture(colorTexture, uv);
+
+            // Visibility boost so the scene doesn't crush to black.
+            vec3 src = clamp(base.rgb * 2.3 + vec3(0.06), 0.0, 1.0);
 
             // Luminance from the base scene
-            float lum = dot(base.rgb, vec3(0.299, 0.587, 0.114));
+            float lum = dot(src, vec3(0.299, 0.587, 0.114));
 
             // High-contrast mapping into phosphor green
             lum = pow(clamp(lum, 0.0, 1.0), 0.45);
             vec3 phosphor = vec3(0.1, 0.95, 0.2);
-            vec3 col = phosphor * lum * 1.25;
+            vec3 col = phosphor * lum * 1.40;
 
             // Vignette (camera lens falloff)
             vec2 c = uv - 0.5;
@@ -485,11 +502,11 @@
             col *= scanlines;
 
             // Exposure boost
-            col *= 1.15;
+            col *= 1.20;
 
             // Slight bloom-ish clamp for crisp phosphor
             col = clamp(col, 0.0, 1.0);
-            gl_FragColor = vec4(col, 1.0);
+            out_FragColor = vec4(col, 1.0);
           }
         `,
         uniforms: {
@@ -503,7 +520,8 @@
         name: "thermalFlir",
         fragmentShader: `
           uniform sampler2D colorTexture;
-          varying vec2 v_textureCoordinates;
+
+          in vec2 v_textureCoordinates;
 
           vec3 thermalRamp(float t) {
             // Cold -> hot: purple/blue -> red/orange -> yellow/white
@@ -523,8 +541,12 @@
           }
 
           void main() {
-            vec4 base = texture2D(colorTexture, v_textureCoordinates);
-            float lum = dot(base.rgb, vec3(0.299, 0.587, 0.114));
+            vec4 base = texture(colorTexture, v_textureCoordinates);
+
+            // Visibility boost so the scene doesn't crush to black.
+            vec3 src = clamp(base.rgb * 2.2 + vec3(0.06), 0.0, 1.0);
+
+            float lum = dot(src, vec3(0.299, 0.587, 0.114));
             lum = pow(clamp(lum, 0.0, 1.0), 0.65);
 
             vec3 col = thermalRamp(lum);
@@ -532,15 +554,17 @@
             // Slight glow/bloom for hottest areas (simple intensity boost)
             float hot = smoothstep(0.80, 1.00, lum);
             col += hot * vec3(0.35, 0.35, 0.28);
-            col *= 1.10;
+            col *= 1.20;
             col = clamp(col, 0.0, 1.0);
-            gl_FragColor = vec4(col, 1.0);
+            out_FragColor = vec4(col, 1.0);
           }
         `,
       });
 
       viewer.scene.postProcessStages.add(nightVisionCrtStage);
       viewer.scene.postProcessStages.add(thermalFlirStage);
+      // Default mode is STANDARD (no post-processing).
+      nightVisionCrtStage.enabled = false;
       thermalFlirStage.enabled = false;
 
       // Sensor mode toggles
