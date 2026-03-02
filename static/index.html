@@ -63,13 +63,13 @@
         width: 92vw;
         height: 85vh;
         display: grid;
-        grid-template-columns: 300px 1fr 300px;
+        grid-template-columns: 240px 1fr 260px;
         grid-template-rows: 1fr 116px;
         grid-template-areas:
           "left  center right"
           "deck  deck   deck";
-        gap: 16px;
-        padding: 16px;
+        gap: 14px;
+        padding: 14px;
         background: rgba(4, 9, 18, 0.96);
         border: 1px solid var(--c-border);
         box-shadow:
@@ -78,8 +78,8 @@
       }
 
       /* ── Rails ───────────────────────────────────────────────────────── */
-      #leftShell  { grid-area: left;  display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow: hidden; }
-      #rightShell { grid-area: right; display: flex; flex-direction: column; gap: 12px; min-width: 0; overflow: hidden; }
+      #leftShell  { grid-area: left;  display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow: hidden; }
+      #rightShell { grid-area: right; display: flex; flex-direction: column; gap: 10px; min-width: 0; overflow: auto; }
 
       /* Rail section headers */
       .rail-header {
@@ -98,23 +98,38 @@
         grid-area: center;
         position: relative;
         display: flex;
-        align-items: stretch;
+        align-items: center;
+        justify-content: center;
         min-width: 0; min-height: 0;
       }
 
+      /* Enforce square frame so the circular mask is always a perfect circle */
       #viewportFrame {
         position: relative;
-        width: 100%;
-        height: 100%;
+        /* Use the smaller of the available width or height to stay square */
+        width: min(100%, calc(100vh - 116px - 3*14px - 28px));
+        aspect-ratio: 1 / 1;
         background: #000;
+        flex-shrink: 0;
       }
 
-      /* Octagonal lens mask on the scene */
+      /* Circular aperture lens mask with soft feathered edge */
       #viewportMask {
         position: absolute;
         inset: 0;
         overflow: hidden;
-        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+        border-radius: 50%;
+        /* 2px feather at the edge */
+        -webkit-mask-image: radial-gradient(circle at 50% 50%, black calc(100% - 2px), transparent 100%);
+        mask-image: radial-gradient(circle at 50% 50%, black calc(100% - 2px), transparent 100%);
+      }
+
+      /* Ensure overlays are also feather-masked to the lens edge */
+      #viewportScanlines,
+      #viewportVignette,
+      #viewportGrain {
+        -webkit-mask-image: radial-gradient(circle at 50% 50%, black calc(100% - 2px), transparent 100%);
+        mask-image: radial-gradient(circle at 50% 50%, black calc(100% - 2px), transparent 100%);
       }
 
       #cesiumContainer {
@@ -136,7 +151,7 @@
       #viewportScanlines {
         position: absolute; inset: 0;
         pointer-events: none;
-        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+        border-radius: 50%;
         background: repeating-linear-gradient(
           to bottom,
           rgba(255,255,255,0.032) 0px,
@@ -144,21 +159,47 @@
           transparent 1px,
           transparent 4px
         );
-        opacity: 0.55;
+        opacity: 0.14;
         mix-blend-mode: overlay;
         z-index: 2;
+        animation: scanline-drift 2.2s linear infinite;
       }
 
-      /* Radial vignette */
+      @keyframes scanline-drift {
+        from { background-position: 0 0; }
+        to   { background-position: 0 18px; }
+      }
+
+      /* Film grain jitter (subtle) — scoped to lens */
+      #viewportGrain {
+        position: absolute; inset: 0;
+        pointer-events: none;
+        border-radius: 50%;
+        z-index: 2;
+        opacity: 0.10;
+        mix-blend-mode: overlay;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='matrix' values='1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23n)' opacity='.70'/%3E%3C/svg%3E");
+        background-size: 220px 220px;
+        animation: grain-shift 0.18s steps(2) infinite;
+      }
+      @keyframes grain-shift {
+        0%   { transform: translate(0, 0); }
+        25%  { transform: translate(-1px, 1px); }
+        50%  { transform: translate(1px, -1px); }
+        75%  { transform: translate(-1px, -1px); }
+        100% { transform: translate(0, 0); }
+      }
+
+      /* Radial vignette — deep edges to make centre pop */
       #viewportVignette {
         position: absolute; inset: 0;
         pointer-events: none;
-        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
+        border-radius: 50%;
         background: radial-gradient(
           ellipse at 50% 50%,
-          transparent 36%,
-          rgba(0,0,0,0.32) 66%,
-          rgba(0,0,0,0.62) 100%
+          transparent 22%,
+          rgba(0,0,0,0.62) 52%,
+          rgba(0,0,0,0.94) 100%
         );
         z-index: 3;
       }
@@ -166,14 +207,34 @@
       /* Glowing cyan bezel ring */
       #viewportRing {
         position: absolute;
-        inset: -1px;
+        inset: -2px;
         pointer-events: none;
-        clip-path: polygon(14% 0%,86% 0%,100% 14%,100% 86%,86% 100%,14% 100%,0% 86%,0% 14%);
-        border: 1px solid var(--c-cyan-mid);
+        border-radius: 50%;
+        border: 2px solid var(--c-cyan-mid);
         box-shadow:
-          inset 0 0 12px rgba(0, 245, 255, 0.09),
-                0 0  8px rgba(0, 245, 255, 0.14);
+          inset 0 0 18px rgba(0, 245, 255, 0.32),
+          inset 0 0 50px rgba(0, 245, 255, 0.12),
+                0 0  10px rgba(0, 245, 255, 0.20),
+                0 0  30px rgba(0, 245, 255, 0.08);
         z-index: 4;
+        animation: ring-pulse 3.8s ease-in-out infinite;
+      }
+
+      @keyframes ring-pulse {
+        0%, 100% {
+          box-shadow:
+            inset 0 0 18px rgba(0, 245, 255, 0.28),
+            inset 0 0 50px rgba(0, 245, 255, 0.10),
+                  0 0  10px rgba(0, 245, 255, 0.18),
+                  0 0  28px rgba(0, 245, 255, 0.07);
+        }
+        50% {
+          box-shadow:
+            inset 0 0 22px rgba(0, 245, 255, 0.38),
+            inset 0 0 56px rgba(0, 245, 255, 0.16),
+                  0 0  14px rgba(0, 245, 255, 0.28),
+                  0 0  40px rgba(0, 245, 255, 0.12);
+        }
       }
 
       /* ── Panel glass ─────────────────────────────────────────────────── */
@@ -183,6 +244,8 @@
         padding: 10px 13px;
         background: var(--c-panel);
         border: 1px solid var(--c-border);
+        backdrop-filter: blur(4px);
+        -webkit-backdrop-filter: blur(4px);
         pointer-events: auto;
         flex-shrink: 0;
       }
@@ -267,13 +330,14 @@
       .slider-group {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 11px;
       }
       .slider-row {
         display: flex;
         align-items: center;
         gap: 8px;
         font-size: 11px;
+        padding: 2px 0;
       }
       .slider-label {
         width: 62px; flex: 0 0 62px;
@@ -306,6 +370,17 @@
       #panelInspect { display: none; flex-shrink: 1; overflow: auto; }
       #inspectBody  { font-size: 11px; line-height: 1.55; white-space: pre-wrap; opacity: 0.88; }
 
+      /* ── Live intercept log ─────────────────────────────────────────── */
+      #panelIntercept { flex-shrink: 0; }
+      #interceptBody {
+        font-size: 11px;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        opacity: 0.92;
+        max-height: 240px;
+        overflow: auto;
+      }
+
       /* ── Bottom command deck ─────────────────────────────────────────── */
       #bottomShell {
         grid-area: deck;
@@ -335,7 +410,14 @@
       .deck-row {
         display: flex;
         align-items: center;
+        justify-content: center;
         gap: 10px;
+      }
+      /* Thin mechanical separator between Location and Mode rows */
+      .deck-row + .deck-row {
+        padding-top: 8px;
+        border-top: 1px solid rgba(0, 245, 255, 0.12);
+        margin-top: 2px;
       }
       .deck-label {
         width: 90px; flex: 0 0 90px;
@@ -386,7 +468,92 @@
         opacity: 1;
         box-shadow: 0 0 10px rgba(0, 245, 255, 0.55);
       }
-    </style>
+
+      /* ── Scan reticle ─────────────────────────────────────────────── */
+      #reticle {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        z-index: 5;
+        border-radius: 50%;
+        overflow: hidden;
+      }
+      /* Four corner brackets */
+      .r-corner {
+        position: absolute;
+        width: 22px; height: 22px;
+        border-color: rgba(0, 255, 106, 0.72);
+        border-style: solid;
+      }
+      .r-corner.tl { top:12%; left:12%; border-width:2px 0 0 2px; }
+      .r-corner.tr { top:12%; right:12%; border-width:2px 2px 0 0; }
+      .r-corner.bl { bottom:12%; left:12%; border-width:0 0 2px 2px; }
+      .r-corner.br { bottom:12%; right:12%; border-width:0 2px 2px 0; }
+      /* Crosshair lines */
+      .r-hline, .r-vline {
+        position: absolute;
+        background: rgba(0, 255, 106, 0.22);
+        pointer-events: none;
+      }
+      .r-hline { top:50%; left:10%; width:80%; height:1px; transform:translateY(-50%); }
+      .r-vline { left:50%; top:10%; height:80%; width:1px; transform:translateX(-50%); }
+      /* Rotating sweep line */
+      .r-sweep {
+        position: absolute;
+        top: 50%; left: 50%;
+        width: 50%; height: 1px;
+        transform-origin: 0% 50%;
+        background: linear-gradient(90deg, rgba(0,255,106,0.55), transparent);
+        animation: reticle-sweep 6s linear infinite;
+      }
+      @keyframes reticle-sweep {
+        from { transform: rotate(0deg); }
+        to   { transform: rotate(360deg); }
+      }
+      /* Ping flash on reticle — triggered by JS */
+      .r-corner.ping {
+        border-color: rgba(0, 255, 106, 1);
+        box-shadow: 0 0 10px rgba(0,255,106,0.8);
+        transition: border-color 0.08s, box-shadow 0.08s;
+      }
+
+      /* ── HUD alert (DETECTION flash) ─────────────────────────────── */
+      #hudAlert {
+        color: var(--c-amber);
+        opacity: 0.75;
+        transition: opacity 0.08s, color 0.08s, text-shadow 0.08s;
+      }
+      #hudAlert.is-detect {
+        color: var(--c-green);
+        opacity: 1;
+        text-shadow: 0 0 10px rgba(0,255,106,0.65);
+      }
+
+      /* ── Sensor jitter (NVG / FLIR) ──────────────────────────────────── */
+      #viewportFrame.has-jitter {
+        animation: sensor-jitter 0.12s steps(1) infinite;
+      }
+      @keyframes sensor-jitter {
+        0%   { transform: translate(0,0); }
+        25%  { transform: translate(0.6px, -0.4px); }
+        50%  { transform: translate(-0.5px, 0.3px); }
+        75%  { transform: translate(0.4px, 0.5px); }
+        100% { transform: translate(0,0); }
+      }
+
+      /* ── Mission log ─────────────────────────────────────────────── */
+      #panelMissionLog { flex: 1 1 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+      #missionLogBody {
+        flex: 1; overflow-y: auto; overflow-x: hidden;
+        font-size: 10px; line-height: 1.6;
+        color: rgba(0,245,255,0.72);
+        white-space: pre-wrap;
+        scrollbar-width: none;
+      }
+      #missionLogBody::-webkit-scrollbar { display: none; }
+      .log-line { display: block; }
+      .log-line.warn  { color: var(--c-amber); }
+      .log-line.alert { color: var(--c-green); }
   </head>
   <body>
     <div id="appShell">
@@ -399,6 +566,7 @@
           <div class="hud-title">System Status</div>
           <div class="hud-row"><span class="hud-muted">UPLINK</span><span>SECURE</span></div>
           <div class="hud-row"><span class="hud-muted">DATALINK</span><span id="datalinkStatus">ACTIVE</span></div>
+          <div class="hud-row"><span class="hud-muted">ALERT</span><span id="hudAlert">—</span></div>
           <div class="hud-row"><span class="hud-muted">CLOCK</span><span id="hudClock">--:--:--</span></div>
           <div class="hud-row"><span class="hud-muted">SATS</span><span id="satCount">—</span></div>
           <div class="hud-row"><span class="hud-muted">AIR</span><span id="flightCount">—</span></div>
@@ -429,6 +597,11 @@
             </div>
           </div>
         </div>
+
+        <div id="panelMissionLog" class="hud-panel">
+          <div class="hud-title">Mission Log</div>
+          <div id="missionLogBody"></div>
+        </div>
       </div>
 
       <!-- ── CENTER: Scope Viewport ─────────────────────────────────── -->
@@ -437,9 +610,19 @@
           <div id="viewportMask">
             <div id="cesiumContainer"></div>
           </div>
+          <div id="viewportGrain"></div>
           <div id="viewportScanlines"></div>
           <div id="viewportVignette"></div>
           <div id="viewportRing"></div>
+          <div id="reticle">
+            <span class="r-corner tl"></span>
+            <span class="r-corner tr"></span>
+            <span class="r-corner bl"></span>
+            <span class="r-corner br"></span>
+            <span class="r-hline"></span>
+            <span class="r-vline"></span>
+            <span class="r-sweep"></span>
+          </div>
         </div>
       </div>
 
@@ -480,27 +663,32 @@
           </div>
         </div>
 
+        <div id="panelIntercept" class="hud-panel">
+          <div class="hud-title">Live Intercept Log</div>
+          <div id="interceptBody">(no intercept)</div>
+        </div>
+
         <div class="hud-panel">
           <div class="hud-title">Image Control</div>
           <div class="slider-group">
             <div class="slider-row">
               <span class="slider-label">GAIN</span>
-              <input class="slider-track" type="range" min="0" max="100" value="72" />
+              <input id="sliderGain" class="slider-track" type="range" min="0" max="100" value="72" />
               <span class="slider-val">72</span>
             </div>
             <div class="slider-row">
               <span class="slider-label">CONTRAST</span>
-              <input class="slider-track" type="range" min="0" max="100" value="58" />
+              <input id="sliderContrast" class="slider-track" type="range" min="0" max="100" value="58" />
               <span class="slider-val">58</span>
             </div>
             <div class="slider-row">
               <span class="slider-label">NOISE</span>
-              <input class="slider-track" type="range" min="0" max="100" value="24" />
+              <input id="sliderNoise" class="slider-track" type="range" min="0" max="100" value="24" />
               <span class="slider-val">24</span>
             </div>
             <div class="slider-row">
               <span class="slider-label">BLOOM</span>
-              <input class="slider-track" type="range" min="0" max="100" value="40" />
+              <input id="sliderBloom" class="slider-track" type="range" min="0" max="100" value="40" />
               <span class="slider-val">40</span>
             </div>
           </div>
@@ -552,32 +740,71 @@
         sceneModePicker: false,
         navigationHelpButton: false,
         fullscreenButton: false,
-        // We'll force the imagery layers right after init for reliability.
       });
 
       viewer.scene.globe.enableLighting = false;
 
-      // --- Guaranteed visible base imagery (OSM) ---
-      // 1) Remove any existing layers (including defaults)
+      // ── Google Photorealistic 3D Tiles ─────────────────────────────────
+      // Replace YOUR_GOOGLE_MAPS_API_KEY with your key to enable volumetric
+      // city models. Falls back to OSM imagery if key is missing/invalid.
+      const Maps_API_KEY = "YOUR_KEY_HERE";
+
+      (async function loadGoogleTiles() {
+        if (Maps_API_KEY === "YOUR_KEY_HERE") {
+          console.info("[3D Tiles] No API key set — using OSM fallback.");
+          return;
+        }
+        try {
+          Cesium.GoogleMaps.defaultApiKey = Maps_API_KEY;
+          const tileset = await Cesium.createGooglePhotorealistic3DTileset();
+          viewer.scene.primitives.add(tileset);
+          // Hide the flat globe — 3D tiles replace it entirely.
+          viewer.scene.globe.show = false;
+          // Remove 2D imagery so the scene reads as volumetric-only.
+          viewer.imageryLayers.removeAll(true);
+          console.info("[3D Tiles] Google Photorealistic 3D Tiles loaded.");
+        } catch (err) {
+          console.warn("[3D Tiles] Failed to load — falling back to OSM:", err);
+        }
+      })();
+
+      // --- OSM fallback imagery (used when 3D Tiles are not active) ---
+      // Keep the token-free base layer by default; it is removed when 3D tiles load.
       viewer.imageryLayers.removeAll(true);
-      // 2) Add explicit OpenStreetMap imagery
       viewer.imageryLayers.addImageryProvider(
         new Cesium.OpenStreetMapImageryProvider({
           url: "https://tile.openstreetmap.org/",
         })
       );
 
-      // --- CCTV sensor zone (placeholder material) ---
-      // (We intentionally avoid a remote MP4 here to prevent CORS/black-texture issues.)
-      const cctvFillMaterial = new Cesium.ColorMaterialProperty(
-        new Cesium.CallbackProperty((time) => {
-          const t = Cesium.JulianDate.toDate(time).getTime() / 1000.0;
-          // Subtle pulse to suggest an active scan zone.
-          const pulse = 0.5 + 0.5 * Math.sin(t * 2.0);
-          const alpha = 0.16 + pulse * 0.06;
-          return Cesium.Color.fromCssColorString("#003100").withAlpha(alpha);
-        }, false)
-      );
+      // --- CCTV sensor zone: animated noise/static intercept simulation ---
+      // Cesium Fabric custom material — animates per-frame using czm_frameNumber.
+      const cctvNoiseMaterial = new Cesium.Material({
+        fabric: {
+          type: "CctvStaticNoise",
+          source: `
+            czm_material czm_getMaterial(czm_materialInput materialInput) {
+              czm_material m = czm_getDefaultMaterial(materialInput);
+              vec2 uv = materialInput.st;
+              float f = czm_frameNumber;
+
+              // Two-layer hash noise that refreshes every frame.
+              float n1 = fract(sin(dot(uv * 80.0, vec2(127.1, 311.7)) + f * 0.09) * 43758.5453);
+              float n2 = fract(sin(dot(uv * 55.0, vec2(269.5, 183.3)) + f * 0.17) * 43758.5453);
+              float noise = (n1 * 0.6 + n2 * 0.4);
+
+              // Horizontal scanline flutter.
+              float scan = step(0.5, fract(uv.y * 28.0 + f * 0.05));
+              float intensity = clamp(noise * 0.75 + scan * 0.12, 0.0, 1.0);
+
+              m.diffuse = vec3(0.0, intensity * 0.88 + 0.06, intensity * 0.12);
+              m.alpha = 0.38 + intensity * 0.28;
+              return m;
+            }
+          `,
+        },
+        translucent: true,
+      });
       const cctvOutlineColor = Cesium.Color.LIME.withAlpha(0.95);
 
       // Hunter St. & Bethune St. intersection (Peterborough, ON)
@@ -594,8 +821,11 @@
         name: "CCTV-01: HUNTER/BETHUNE LIVE",
         rectangle: {
           coordinates: cctvRect,
-          material: cctvFillMaterial,
-          outline: true,
+          material: cctvNoiseMaterial,
+          // Hint Cesium to project/classify onto 3D Tiles when available.
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          classificationType: Cesium.ClassificationType.CESIUM_3D_TILE,
+          outline: false,
           outlineColor: cctvOutlineColor,
         },
       });
@@ -659,6 +889,7 @@
       // --- HUD wiring ---
       const panelInspect = document.getElementById("panelInspect");
       const inspectBody = document.getElementById("inspectBody");
+      const interceptBody = document.getElementById("interceptBody");
 
       function showInspect(text) {
         if (!panelInspect || !inspectBody) return;
@@ -669,6 +900,20 @@
       function hideInspect() {
         if (!panelInspect) return;
         panelInspect.style.display = "none";
+      }
+
+      function setHudAlert(text, isDetect) {
+        const el = document.getElementById("hudAlert");
+        if (!el) return;
+        el.textContent = text;
+        el.classList.toggle("is-detect", !!isDetect);
+      }
+
+      let _hudAlertTimeout = null;
+      function flashHudDetection() {
+        if (_hudAlertTimeout) clearTimeout(_hudAlertTimeout);
+        setHudAlert("SIGNAL DETECTED", true);
+        _hudAlertTimeout = setTimeout(() => setHudAlert("—", false), 800);
       }
 
       function updateHudClock() {
@@ -786,6 +1031,16 @@
         if (lockedTarget && lockedTarget.entity) {
           applyLockVisual(lockedTarget.entity, lockedTarget.kind, false);
         }
+        // Release camera tracking.
+        viewer.trackedEntity = undefined;
+        stopTargetInterceptLog();
+        // Reset status element to free state.
+        const statusEl = document.getElementById("target-status");
+        if (statusEl) {
+          statusEl.textContent = "FREE";
+          statusEl.style.color = "";
+          statusEl.style.textShadow = "";
+        }
         lockedTarget = null;
         setTargetingFree(lastMouseLonLat.lon, lastMouseLonLat.lat);
       }
@@ -814,8 +1069,18 @@
           speed: kind === "satellite" ? null : NaN,
         };
         applyLockVisual(entity, kind, true);
-
-        // Explicit target-object update (stable HUD contract)
+        // Lock camera to entity so it physically follows orbital path / flight path.
+        viewer.trackedEntity = entity;
+        // Ensure target intercept takes over from any CCTV intercept.
+        stopCctvSensorLog();
+        startTargetInterceptLog(entity);
+        // Show red LOCK:ACTIVE status.
+        const statusEl = document.getElementById("target-status");
+        if (statusEl) {
+          statusEl.textContent = "LOCK: ACTIVE";
+          statusEl.style.color = "#ff3b3b";
+          statusEl.style.textShadow = "0 0 8px rgba(255,59,59,0.7)";
+        }
         const props = entity && entity.properties ? entity.properties : null;
         if (props) {
           const lon = getPropValue(props.lon);
@@ -928,9 +1193,7 @@
             typeof centerLon === "number" &&
             typeof status === "string"
           ) {
-            showInspect(
-              `CCTV ZONE\nNAME: ${name}\nCENTER: ${centerLat.toFixed(5)}, ${centerLon.toFixed(5)}\nSTATUS: ${status}`
-            );
+            startCctvSensorLog(name, centerLat, centerLon, "MANUAL");
           }
           // Don't disturb any existing lock if user clicks the CCTV zone.
           return;
@@ -1294,6 +1557,13 @@
           .forEach((btn) => {
             btn.classList.toggle("active", btn.getAttribute("data-mode") === mode);
           });
+
+        // Toggle jitter animation on viewport for active sensor modes.
+        const vFrame = document.getElementById("viewportFrame");
+        if (vFrame) vFrame.classList.toggle("has-jitter", mode !== "standard");
+
+        // Audio feedback: short beep on mode switch.
+        audioClick();
       }
 
       // Delegate clicks from the deck container — handles any DOM ordering.
@@ -1334,10 +1604,10 @@
 
       // --- Location preset coordinate table ---
       const LOCATION_PRESETS = {
-        home:   { lon: cctvLon,  lat: cctvLat,  alt: 2500.0, pitch: -50 },
-        london: { lon: -0.0754,  lat: 51.5055,  alt: 1500.0, pitch: -45 },
-        austin: { lon: -97.7431, lat: 30.2672,  alt: 2000.0, pitch: -45 },
-        tokyo:  { lon: 139.7013, lat: 35.6581,  alt: 1800.0, pitch: -45 },
+        home:   { lon: cctvLon,  lat: cctvLat,  alt: 2500.0, pitch: -45 },
+        london: { lon: -0.0754,  lat: 51.5055,  alt: 800.0,  pitch: -32 },
+        austin: { lon: -97.7431, lat: 30.2672,  alt: 900.0,  pitch: -30 },
+        tokyo:  { lon: 139.7013, lat: 35.6581,  alt: 850.0,  pitch: -30 },
       };
 
       function setActiveLocationChip(key) {
@@ -1392,6 +1662,347 @@
 
       // Mark HOME as active on initial load.
       setActiveLocationChip("home");
+
+      // --- Web Audio: background hum + mode-switch click ---
+      let _audioCtx = null;
+      let _humGain = null;
+      function getAudioCtx() {
+        if (!_audioCtx) {
+          try {
+            _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            // Low-frequency hum (42 Hz at very low gain).
+            const osc = _audioCtx.createOscillator();
+            osc.type = "sine";
+            osc.frequency.value = 42;
+            _humGain = _audioCtx.createGain();
+            _humGain.gain.value = 0.012;
+            osc.connect(_humGain);
+            _humGain.connect(_audioCtx.destination);
+            osc.start();
+          } catch (e) { /* autoplay blocked or unsupported */ }
+        }
+        return _audioCtx;
+      }
+      function audioClick() {
+        try {
+          const ctx = getAudioCtx();
+          if (!ctx) return;
+          if (ctx.state === "suspended") ctx.resume();
+          const osc = ctx.createOscillator();
+          const g   = ctx.createGain();
+          osc.type = "square";
+          osc.frequency.value = 880;
+          g.gain.setValueAtTime(0.08, ctx.currentTime);
+          g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.06);
+          osc.connect(g);
+          g.connect(ctx.destination);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.07);
+        } catch (e) {}
+      }
+      // Kick audio context alive on first user interaction with the page.
+      document.addEventListener("pointerdown", () => {
+        const ctx = getAudioCtx();
+        if (ctx && ctx.state === "suspended") ctx.resume();
+      }, { once: true });
+
+      // --- Mission log ticker ---
+      (function initMissionLog() {
+        const body = document.getElementById("missionLogBody");
+        if (!body) return;
+
+        const POOL = [
+          { text: "[SYS-001] UPLINK AUTHENTICATED",           cls: "" },
+          { text: "[ORBITAL] PROPAGATING TLE DATA...",         cls: "" },
+          { text: "[INTCPT-092] SIGNAL STRENGTH 88%",           cls: "alert" },
+          { text: "[SENSOR-FIX] HUNTER/BETHUNE STABLE",        cls: "alert" },
+          { text: "[AIR-DATA] POLLING OPENSKY NETWORK",        cls: "" },
+          { text: "[ORBITAL] SGP4 TICK COMPLETE",              cls: "" },
+          { text: "[WARN] IONOSPHERIC SCATTER DETECTED",       cls: "warn" },
+          { text: "[INTCPT-093] BEARING 247° CONFIRMED",       cls: "alert" },
+          { text: "[SAT-FEED] 15s REFRESH SCHEDULED",          cls: "" },
+          { text: "[WARN] CHANNEL NOISE +2.1 dB",              cls: "warn" },
+          { text: "[SENSOR-FIX] LOCK INTEGRITY 99.4%",         cls: "alert" },
+          { text: "[ORBITAL] NEXT PASS IN 00:08:42",           cls: "" },
+          { text: "[SYS-002] THERMAL STAGE STANDBY",           cls: "" },
+          { text: "[INTCPT-094] VELOCITY DELTA 0.03 m/s",      cls: "alert" },
+          { text: "[AIR-DATA] 7 CONTACTS IN BBOX",             cls: "" },
+          { text: "[WARN] RF INTERFERENCE — COMPENSATING",    cls: "warn" },
+        ];
+        const MAX_VISIBLE = 14;
+        let pool = [...POOL].sort(() => Math.random() - 0.5);
+        let idx = 0;
+
+        function tick() {
+          const entry = pool[idx % pool.length];
+          idx++;
+          const t = new Date().toLocaleTimeString("en-US", { hour12:false });
+          const span = document.createElement("span");
+          span.className = "log-line" + (entry.cls ? " " + entry.cls : "");
+          span.textContent = `${t} ${entry.text}\n`;
+          body.prepend(span);
+          // Prune old lines.
+          while (body.children.length > MAX_VISIBLE) body.removeChild(body.lastChild);
+        }
+
+        tick();
+        setInterval(tick, 2200);
+      })();
+
+      // --- Reticle ping when sweep passes entity zone ---
+      (function initReticleDetectionSweep() {
+        const corners = Array.from(document.querySelectorAll(".r-corner"));
+        const frame = document.getElementById("viewportFrame");
+        if (!corners.length || !frame) return;
+
+        const SWEEP_PERIOD_MS = 6000;
+        const ANGLE_WINDOW = 0.085; // radians (~4.9°)
+        const DETECT_COOLDOWN_MS = 1200;
+        const lastDetectAtById = new Map();
+
+        function normAngle(a) {
+          const twoPi = Math.PI * 2;
+          a = a % twoPi;
+          return a < 0 ? a + twoPi : a;
+        }
+
+        function angleDelta(a, b) {
+          const twoPi = Math.PI * 2;
+          let d = Math.abs(a - b) % twoPi;
+          if (d > Math.PI) d = twoPi - d;
+          return d;
+        }
+
+        function pingReticle() {
+          corners.forEach((c) => c.classList.add("ping"));
+          setTimeout(() => corners.forEach((c) => c.classList.remove("ping")), 240);
+        }
+
+        function checkEntity(entity, id, sweepAngle, centerX, centerY, radius, nowMs) {
+          if (!entity || !entity.position) return false;
+          let pos;
+          try {
+            pos = entity.position.getValue(Cesium.JulianDate.now());
+          } catch (_) {
+            return false;
+          }
+          if (!pos) return false;
+          const p = viewer.scene.cartesianToCanvasCoordinates(pos);
+          if (!p) return false;
+
+          const dx = p.x - centerX;
+          const dy = p.y - centerY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (!Number.isFinite(dist) || dist > radius * 0.93) return false;
+
+          const ang = normAngle(Math.atan2(-(dy), dx));
+          if (angleDelta(ang, sweepAngle) > ANGLE_WINDOW) return false;
+
+          const lastAt = lastDetectAtById.get(id) || 0;
+          if (nowMs - lastAt < DETECT_COOLDOWN_MS) return false;
+          lastDetectAtById.set(id, nowMs);
+          return true;
+        }
+
+        function loop() {
+          const rect = frame.getBoundingClientRect();
+          const centerX = rect.left + rect.width / 2;
+          const centerY = rect.top + rect.height / 2;
+          const radius = Math.min(rect.width, rect.height) / 2;
+
+          const nowMs = performance.now();
+          const sweepAngle = normAngle(((nowMs % SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS) * Math.PI * 2);
+
+          let detected = false;
+          for (const [icao24, ent] of flightEntitiesByIcao24.entries()) {
+            if (checkEntity(ent, `air:${icao24}`, sweepAngle, centerX, centerY, radius, nowMs)) {
+              detected = true;
+              break;
+            }
+          }
+          if (!detected) {
+            for (const [name, ent] of satelliteEntitiesByName.entries()) {
+              if (checkEntity(ent, `sat:${name}`, sweepAngle, centerX, centerY, radius, nowMs)) {
+                detected = true;
+                break;
+              }
+            }
+          }
+
+          if (detected) {
+            pingReticle();
+            flashHudDetection();
+          }
+
+          requestAnimationFrame(loop);
+        }
+
+        requestAnimationFrame(loop);
+      })();
+
+      // Initialize default HUD alert.
+      setHudAlert("—", false);
+
+      // --- Live intercept logs (target + CCTV) ---
+      let cctvLogInterval = null;
+      let targetLogInterval = null;
+      let _cctvAutoEngaged = false;
+
+      function renderIntercept(lines, header) {
+        if (!interceptBody) return;
+        const MAX_LINES = 10;
+        const safe = Array.isArray(lines) ? lines.slice(0, MAX_LINES) : [];
+        interceptBody.textContent = `${header}\n${"-".repeat(28)}\n` + safe.join(`\n${"-".repeat(28)}\n`);
+      }
+
+      function startCctvSensorLog(name, centerLat, centerLon, source) {
+        if (lockedTarget) return; // locked target has priority in this panel
+        if (cctvLogInterval) clearInterval(cctvLogInterval);
+
+        const lines = [];
+        const MAX_LINES = 10;
+
+        function addLine() {
+          const jitter = () => (Math.random() - 0.5) * 0.0018;
+          const t = new Date().toLocaleTimeString("en-US", { hour12: false });
+          const lat = (centerLat + jitter()).toFixed(5);
+          const lon = (centerLon + jitter()).toFixed(5);
+          const vel = (Math.random() * 4.8 + 0.2).toFixed(2);
+          const conf = Math.floor(70 + Math.random() * 30);
+          lines.unshift(`${t}\n  LAT ${lat} LON ${lon}\n  VEL ${vel}m/s  CONF ${conf}%`);
+          if (lines.length > MAX_LINES) lines.length = MAX_LINES;
+          renderIntercept(lines, `>> SENSOR INTERCEPT (${source || "CCTV"})\nSENSOR: ${name}`);
+        }
+
+        addLine();
+        cctvLogInterval = setInterval(addLine, 1500);
+      }
+
+      function stopCctvSensorLog() {
+        _cctvAutoEngaged = false;
+        if (cctvLogInterval) {
+          clearInterval(cctvLogInterval);
+          cctvLogInterval = null;
+        }
+        if (interceptBody && !targetLogInterval) interceptBody.textContent = "(no intercept)";
+      }
+
+      function startTargetInterceptLog(entity) {
+        if (targetLogInterval) clearInterval(targetLogInterval);
+        if (!entity || !entity.properties) return;
+        const props = entity.properties;
+        const kind = getEntityKind(entity);
+        const name = (kind === "aircraft")
+          ? ((getPropValue(props.callsign) || "").trim() || getPropValue(props.icao24) || "TARGET")
+          : (getPropValue(props.name) || "TARGET");
+
+        const lines = [];
+        const MAX_LINES = 10;
+        function addLine() {
+          const t = new Date().toLocaleTimeString("en-US", { hour12: false });
+          const lat = getPropValue(props.lat);
+          const lon = getPropValue(props.lon);
+          const spd = getPropValue(props.speed_mps);
+          const vel = (typeof spd === "number" && Number.isFinite(spd)) ? spd.toFixed(1) : "N/A";
+          const conf = Math.floor(74 + Math.random() * 26);
+          const latS = (typeof lat === "number" && Number.isFinite(lat)) ? lat.toFixed(5) : "—";
+          const lonS = (typeof lon === "number" && Number.isFinite(lon)) ? lon.toFixed(5) : "—";
+          lines.unshift(`${t}\n  LAT ${latS} LON ${lonS}\n  VEL ${vel}${vel === "N/A" ? "" : "m/s"}  CONF ${conf}%`);
+          if (lines.length > MAX_LINES) lines.length = MAX_LINES;
+          renderIntercept(lines, `>> TARGET INTERCEPT\nTARGET: ${name}`);
+        }
+        addLine();
+        targetLogInterval = setInterval(addLine, 1200);
+      }
+
+      function stopTargetInterceptLog() {
+        if (targetLogInterval) {
+          clearInterval(targetLogInterval);
+          targetLogInterval = null;
+        }
+        if (interceptBody && !cctvLogInterval) interceptBody.textContent = "(no intercept)";
+      }
+
+      (function initCctvAutoIntercept() {
+        function insideRect(lon, lat, rect) {
+          if (!Number.isFinite(lon) || !Number.isFinite(lat)) return false;
+          const west = Cesium.Math.toDegrees(rect.west);
+          const east = Cesium.Math.toDegrees(rect.east);
+          const south = Cesium.Math.toDegrees(rect.south);
+          const north = Cesium.Math.toDegrees(rect.north);
+          return lon >= west && lon <= east && lat >= south && lat <= north;
+        }
+
+        function getCenterLonLat() {
+          const canvas = viewer.scene.canvas;
+          const center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+          // Try to pick actual 3D surface first (3D tiles), fall back to ellipsoid.
+          let cart = null;
+          try {
+            cart = viewer.scene.pickPosition(center);
+          } catch (_) {}
+          if (!Cesium.defined(cart)) {
+            const ray = viewer.camera.getPickRay(center);
+            if (ray) {
+              cart = viewer.scene.globe.pick(ray, viewer.scene);
+            }
+          }
+          if (!Cesium.defined(cart)) return null;
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          return {
+            lon: Cesium.Math.toDegrees(c.longitude),
+            lat: Cesium.Math.toDegrees(c.latitude),
+          };
+        }
+
+        setInterval(() => {
+          if (lockedTarget) return;
+          const ll = getCenterLonLat();
+          if (!ll) return;
+          const inZone = insideRect(ll.lon, ll.lat, cctvRect);
+          if (inZone && !_cctvAutoEngaged) {
+            _cctvAutoEngaged = true;
+            startCctvSensorLog("CCTV-01: HUNTER/BETHUNE LIVE", cctvLat, cctvLon, "AUTO");
+          } else if (!inZone && _cctvAutoEngaged) {
+            stopCctvSensorLog();
+          }
+        }, 900);
+      })();
+
+      // --- Image Control sliders → CSS filter on viewport ---
+      (function initImageSliders() {
+        const frame = document.getElementById("viewportFrame");
+        const sliders = {
+          gain:     { el: document.getElementById("sliderGain"),     val: 72 },
+          contrast: { el: document.getElementById("sliderContrast"), val: 58 },
+          noise:    { el: document.getElementById("sliderNoise"),    val: 24 },
+          bloom:    { el: document.getElementById("sliderBloom"),    val: 40 },
+        };
+
+        function applyFilter() {
+          if (!frame) return;
+          // gain   → brightness: 0.55 (gain=0) to 1.65 (gain=100)
+          // contrast → contrast:  0.70 (c=0)    to 1.90 (c=100)
+          // noise  → blur:       0px  (n=0)    to 1.5px (n=100)
+          // bloom  → saturate:   0.8  (b=0)    to 2.0   (b=100)
+          const b  = (0.55 + (sliders.gain.val     / 100) * 1.10).toFixed(2);
+          const c  = (0.70 + (sliders.contrast.val / 100) * 1.20).toFixed(2);
+          const bl = ((sliders.noise.val / 100) * 1.50).toFixed(2);
+          const s  = (0.80 + (sliders.bloom.val    / 100) * 1.20).toFixed(2);
+          frame.style.filter = `brightness(${b}) contrast(${c}) blur(${bl}px) saturate(${s})`;
+        }
+
+        for (const s of Object.values(sliders)) {
+          if (!s.el) continue;
+          s.el.addEventListener("input", (e) => {
+            s.val = Number(e.target.value);
+            const valEl = e.target.nextElementSibling;
+            if (valEl) valEl.textContent = s.val;
+            applyFilter();
+          });
+        }
+        applyFilter();
+      })();
 
       // After the CSS grid layout has settled, force Cesium to redraw to the
       // actual container size (avoids a stale tiny-canvas from init-time size).
