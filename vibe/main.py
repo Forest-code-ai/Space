@@ -7,6 +7,7 @@ from pathlib import Path
 import requests
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi import Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sgp4.api import Satrec, jday
@@ -24,6 +25,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 @app.get("/", include_in_schema=False)
 def read_root() -> FileResponse:
     return FileResponse(path=str(INDEX_HTML), media_type="text/html")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
 
 
 @app.get("/api/flights")

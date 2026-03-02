@@ -152,6 +152,21 @@
   <body>
     <div id="cesiumContainer"></div>
 
+    <video
+      id="cctv-feed"
+      autoplay
+      loop
+      crossorigin="anonymous"
+      muted
+      playsinline
+      style="display: none"
+    >
+      <source
+        src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
+        type="video/mp4"
+      />
+    </video>
+
     <div id="hud" aria-hidden="true">
       <div id="panelStatus" class="hud-panel">
         <div class="hud-title">SYSTEM STATUS</div>
@@ -168,11 +183,11 @@
 
       <div id="panelSensors" class="hud-panel">
         <div class="hud-title">SENSOR ARRAY</div>
-        <div class="hud-row"><span class="hud-muted">MODE</span><span>NIGHT VISION</span></div>
+        <div class="hud-row"><span class="hud-muted">MODE</span><span>STANDARD</span></div>
         <div class="hud-btns">
-          <button class="hud-btn active" type="button" data-mode="night">NIGHT VISION</button>
+          <button class="hud-btn" type="button" data-mode="night">NIGHT VISION</button>
           <button class="hud-btn" type="button" data-mode="thermal">THERMAL (FLIR)</button>
-          <button class="hud-btn" type="button" data-mode="standard">STANDARD</button>
+          <button class="hud-btn active" type="button" data-mode="standard">STANDARD</button>
         </div>
       </div>
     </div>
@@ -194,6 +209,64 @@
       });
 
       viewer.scene.globe.enableLighting = false;
+
+      // --- CCTV feed projection (placeholder video) ---
+      const cctvVideo = document.getElementById("cctv-feed");
+      if (cctvVideo) {
+        // Autoplay should work because video is muted; ignore failures.
+        cctvVideo.play().catch(() => {});
+      }
+
+      // Hunter St. & Bethune St. intersection (Peterborough, ON)
+      const cctvRect = Cesium.Rectangle.fromDegrees(
+        -78.3223,
+        44.3040,
+        -78.3213,
+        44.3050
+      );
+
+      viewer.entities.add({
+        id: "cctv:01:rect",
+        rectangle: {
+          coordinates: cctvRect,
+          material: new Cesium.ImageMaterialProperty({
+            image: cctvVideo,
+          }),
+        },
+      });
+
+      const cctvLon = -78.3218;
+      const cctvLat = 44.3045;
+      const cctvTopAltM = 220.0;
+
+      viewer.entities.add({
+        id: "cctv:01:uplink",
+        polyline: {
+          positions: [
+            Cesium.Cartesian3.fromDegrees(cctvLon, cctvLat, 0.0),
+            Cesium.Cartesian3.fromDegrees(cctvLon, cctvLat, cctvTopAltM),
+          ],
+          width: 2,
+          material: Cesium.Color.LIME.withAlpha(0.95),
+          clampToGround: false,
+        },
+      });
+
+      viewer.entities.add({
+        id: "cctv:01:label",
+        position: Cesium.Cartesian3.fromDegrees(cctvLon, cctvLat, cctvTopAltM),
+        label: {
+          text: "CCTV-01: HUNTER/BETHUNE LIVE",
+          font: "14px monospace",
+          fillColor: Cesium.Color.LIME,
+          showBackground: true,
+          backgroundColor: Cesium.Color.BLACK.withAlpha(0.35),
+          pixelOffset: new Cesium.Cartesian2(0, -8),
+          horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+          verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        },
+      });
 
       // --- HUD wiring ---
       function updateHudClock() {
@@ -389,9 +462,9 @@
             float lum = dot(base.rgb, vec3(0.299, 0.587, 0.114));
 
             // High-contrast mapping into phosphor green
-            lum = pow(clamp(lum, 0.0, 1.0), 0.55);
+            lum = pow(clamp(lum, 0.0, 1.0), 0.45);
             vec3 phosphor = vec3(0.1, 0.95, 0.2);
-            vec3 col = phosphor * lum;
+            vec3 col = phosphor * lum * 1.25;
 
             // Vignette (camera lens falloff)
             vec2 c = uv - 0.5;
@@ -410,6 +483,9 @@
             float scan = sin((uv.y + drift) * scanFreq * 6.2831853);
             float scanlines = 0.92 + 0.08 * scan;
             col *= scanlines;
+
+            // Exposure boost
+            col *= 1.15;
 
             // Slight bloom-ish clamp for crisp phosphor
             col = clamp(col, 0.0, 1.0);
@@ -455,7 +531,8 @@
 
             // Slight glow/bloom for hottest areas (simple intensity boost)
             float hot = smoothstep(0.80, 1.00, lum);
-            col += hot * vec3(0.25, 0.25, 0.20);
+            col += hot * vec3(0.35, 0.35, 0.28);
+            col *= 1.10;
             col = clamp(col, 0.0, 1.0);
             gl_FragColor = vec4(col, 1.0);
           }
@@ -495,7 +572,8 @@
         });
       }
 
-      setSensorMode("night");
+      // Default to STANDARD for visibility.
+      setSensorMode("standard");
     </script>
   </body>
 </html>
