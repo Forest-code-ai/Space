@@ -5,6 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>vibe — Cesium</title>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap"
+      rel="stylesheet"
+    />
+
     <link
       rel="stylesheet"
       href="https://cesium.com/downloads/cesiumjs/releases/1.114/Build/Cesium/Widgets/widgets.css"
@@ -21,10 +28,155 @@
         padding: 0;
         overflow: hidden;
       }
+
+      body {
+        position: relative;
+      }
+
+      :root {
+        --hud-green: #00ff00;
+        --hud-bg: rgba(0, 0, 0, 0.35);
+      }
+
+      /* HUD overlay */
+      #hud {
+        position: absolute;
+        inset: 0;
+        z-index: 9999;
+        pointer-events: none;
+        font-family: "Share Tech Mono", "Courier New", monospace;
+        color: var(--hud-green);
+        text-shadow: 0 0 6px rgba(0, 255, 0, 0.65);
+      }
+
+      .hud-panel {
+        position: absolute;
+        width: 320px;
+        padding: 10px 12px;
+        background: var(--hud-bg);
+        border: 1px solid rgba(0, 255, 0, 0.85);
+        box-sizing: border-box;
+        pointer-events: auto;
+      }
+
+      .hud-title {
+        font-size: 14px;
+        letter-spacing: 0.08em;
+        margin: 0 0 8px 0;
+      }
+
+      .hud-row {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        font-size: 13px;
+        line-height: 1.35;
+      }
+
+      .hud-muted {
+        opacity: 0.85;
+      }
+
+      /* Crosshair-style corner accents */
+      .hud-panel::before,
+      .hud-panel::after {
+        content: "";
+        position: absolute;
+        width: 18px;
+        height: 18px;
+        border-color: rgba(0, 255, 0, 0.95);
+        pointer-events: none;
+      }
+
+      .hud-panel::before {
+        left: -1px;
+        top: -1px;
+        border-left: 1px solid;
+        border-top: 1px solid;
+      }
+
+      .hud-panel::after {
+        right: -1px;
+        bottom: -1px;
+        border-right: 1px solid;
+        border-bottom: 1px solid;
+      }
+
+      /* Panel placement */
+      #panelStatus {
+        left: 14px;
+        top: 14px;
+      }
+
+      #panelTargeting {
+        right: 14px;
+        top: 14px;
+      }
+
+      #panelSensors {
+        left: 14px;
+        bottom: 14px;
+        width: 360px;
+      }
+
+      .hud-btns {
+        display: flex;
+        gap: 10px;
+        margin-top: 10px;
+      }
+
+      .hud-btn {
+        font-family: inherit;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        padding: 8px 10px;
+        border: 1px solid rgba(0, 255, 0, 0.85);
+        background: rgba(0, 0, 0, 0.25);
+        color: var(--hud-green);
+        text-shadow: inherit;
+      }
+
+      .hud-btn[disabled] {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+
+      .hud-btn.active {
+        background: rgba(0, 255, 0, 1);
+        border-color: rgba(0, 255, 0, 1);
+        color: #000;
+        text-shadow: none;
+      }
     </style>
   </head>
   <body>
     <div id="cesiumContainer"></div>
+
+    <div id="hud" aria-hidden="true">
+      <div id="panelStatus" class="hud-panel">
+        <div class="hud-title">SYSTEM STATUS</div>
+        <div class="hud-row"><span class="hud-muted">UPLINK</span><span>SECURE</span></div>
+        <div class="hud-row"><span class="hud-muted">DATALINK</span><span>ACTIVE</span></div>
+        <div class="hud-row"><span class="hud-muted">CLOCK</span><span id="hudClock">--:--:--</span></div>
+      </div>
+
+      <div id="panelTargeting" class="hud-panel">
+        <div class="hud-title">TARGETING</div>
+        <div class="hud-row"><span class="hud-muted">LON</span><span id="hudLon">---</span></div>
+        <div class="hud-row"><span class="hud-muted">LAT</span><span id="hudLat">---</span></div>
+      </div>
+
+      <div id="panelSensors" class="hud-panel">
+        <div class="hud-title">SENSOR ARRAY</div>
+        <div class="hud-row"><span class="hud-muted">MODE</span><span>NIGHT VISION</span></div>
+        <div class="hud-btns">
+          <button class="hud-btn active" type="button" data-mode="night">NIGHT VISION</button>
+          <button class="hud-btn" type="button" data-mode="thermal">THERMAL (FLIR)</button>
+          <button class="hud-btn" type="button" data-mode="standard">STANDARD</button>
+        </div>
+      </div>
+    </div>
+
     <script>
       // Minimal, token-free base layer using OpenStreetMap tiles.
       const viewer = new Cesium.Viewer("cesiumContainer", {
@@ -42,6 +194,242 @@
       });
 
       viewer.scene.globe.enableLighting = false;
+
+      // --- HUD wiring ---
+      function updateHudClock() {
+        const el = document.getElementById("hudClock");
+        if (!el) return;
+        const now = new Date();
+        el.textContent = now.toLocaleTimeString(undefined, {
+          hour12: false,
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        });
+      }
+
+      updateHudClock();
+      setInterval(updateHudClock, 250);
+
+      const hudLonEl = document.getElementById("hudLon");
+      const hudLatEl = document.getElementById("hudLat");
+      const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      handler.setInputAction((movement) => {
+        const cartesian = viewer.camera.pickEllipsoid(
+          movement.endPosition,
+          viewer.scene.globe.ellipsoid
+        );
+        if (!cartesian) {
+          if (hudLonEl) hudLonEl.textContent = "---";
+          if (hudLatEl) hudLatEl.textContent = "---";
+          return;
+        }
+
+        const carto = Cesium.Cartographic.fromCartesian(cartesian);
+        const lon = Cesium.Math.toDegrees(carto.longitude);
+        const lat = Cesium.Math.toDegrees(carto.latitude);
+        if (hudLonEl) hudLonEl.textContent = lon.toFixed(5);
+        if (hudLatEl) hudLatEl.textContent = lat.toFixed(5);
+      }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+
+      // --- Live flight data (backend proxy) ---
+      const flightEntitiesByIcao24 = new Map();
+
+      function upsertFlightEntity(f) {
+        const id = `flight:${f.icao24}`;
+        const alt = typeof f.geo_alt_m === "number" ? f.geo_alt_m : typeof f.baro_alt_m === "number" ? f.baro_alt_m : 0;
+        const position = Cesium.Cartesian3.fromDegrees(f.lon, f.lat, alt);
+        const labelText = (f.callsign && f.callsign.trim().length > 0) ? f.callsign.trim() : f.icao24;
+
+        let entity = flightEntitiesByIcao24.get(f.icao24);
+        if (!entity) {
+          entity = viewer.entities.add({
+            id,
+            position,
+            point: {
+              color: Cesium.Color.RED.withAlpha(0.95),
+              pixelSize: 6,
+              outlineColor: Cesium.Color.RED,
+              outlineWidth: 1,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+              text: labelText,
+              font: "14px monospace",
+              fillColor: Cesium.Color.LIME,
+              showBackground: true,
+              backgroundColor: Cesium.Color.BLACK.withAlpha(0.35),
+              pixelOffset: new Cesium.Cartesian2(10, -10),
+              horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          });
+          flightEntitiesByIcao24.set(f.icao24, entity);
+        } else {
+          entity.position = position;
+          entity.label.text = labelText;
+        }
+      }
+
+      function removeStaleFlights(liveIcao24Set) {
+        for (const [icao24, entity] of flightEntitiesByIcao24.entries()) {
+          if (!liveIcao24Set.has(icao24)) {
+            viewer.entities.remove(entity);
+            flightEntitiesByIcao24.delete(icao24);
+          }
+        }
+      }
+
+      async function pollFlightsOnce() {
+        const resp = await fetch("/api/flights", { cache: "no-store" });
+        if (!resp.ok) return;
+        const data = await resp.json();
+        const flights = Array.isArray(data.flights) ? data.flights : [];
+
+        const live = new Set();
+        for (const f of flights) {
+          if (!f || typeof f.icao24 !== "string") continue;
+          if (typeof f.lon !== "number" || typeof f.lat !== "number") continue;
+          live.add(f.icao24);
+          upsertFlightEntity(f);
+        }
+        removeStaleFlights(live);
+      }
+
+      pollFlightsOnce();
+      setInterval(pollFlightsOnce, 10_000);
+
+      // Military surveillance aesthetic: night vision phosphor + vignette + grain + CRT scanlines.
+      const nightVisionCrtStage = new Cesium.PostProcessStage({
+        name: "nightVisionCrt",
+        fragmentShader: `
+          uniform sampler2D colorTexture;
+          uniform vec2 viewport;
+          uniform float time;
+          varying vec2 v_textureCoordinates;
+
+          float hash(vec2 p) {
+            // Cheap 2D hash
+            p = vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)));
+            return fract(sin(p.x + p.y) * 43758.5453123);
+          }
+
+          void main() {
+            vec2 uv = v_textureCoordinates;
+            vec4 base = texture2D(colorTexture, uv);
+
+            // Luminance from the base scene
+            float lum = dot(base.rgb, vec3(0.299, 0.587, 0.114));
+
+            // High-contrast mapping into phosphor green
+            lum = pow(clamp(lum, 0.0, 1.0), 0.55);
+            vec3 phosphor = vec3(0.1, 0.95, 0.2);
+            vec3 col = phosphor * lum;
+
+            // Vignette (camera lens falloff)
+            vec2 c = uv - 0.5;
+            float r = length(c);
+            float vignette = smoothstep(0.85, 0.35, r);
+            col *= vignette;
+
+            // Subtle animated film grain
+            float n = hash(uv * viewport + time * 60.0);
+            float grain = (n - 0.5) * 0.08;
+            col += grain;
+
+            // Horizontal CRT scanlines drifting down
+            float scanFreq = 900.0;          // lines per screen height
+            float drift = time * 0.08;       // slow vertical drift
+            float scan = sin((uv.y + drift) * scanFreq * 6.2831853);
+            float scanlines = 0.92 + 0.08 * scan;
+            col *= scanlines;
+
+            // Slight bloom-ish clamp for crisp phosphor
+            col = clamp(col, 0.0, 1.0);
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `,
+        uniforms: {
+          viewport: () => new Cesium.Cartesian2(viewer.canvas.clientWidth, viewer.canvas.clientHeight),
+          time: () => performance.now() / 1000.0,
+        },
+      });
+
+      // Thermal (FLIR) stage
+      const thermalFlirStage = new Cesium.PostProcessStage({
+        name: "thermalFlir",
+        fragmentShader: `
+          uniform sampler2D colorTexture;
+          varying vec2 v_textureCoordinates;
+
+          vec3 thermalRamp(float t) {
+            // Cold -> hot: purple/blue -> red/orange -> yellow/white
+            vec3 cold = vec3(0.10, 0.00, 0.20);
+            vec3 mid1 = vec3(0.10, 0.10, 0.65);
+            vec3 mid2 = vec3(0.85, 0.12, 0.05);
+            vec3 hot = vec3(1.00, 0.95, 0.80);
+
+            float a = smoothstep(0.00, 0.40, t);
+            float b = smoothstep(0.35, 0.75, t);
+            float c = smoothstep(0.70, 1.00, t);
+
+            vec3 col = mix(cold, mid1, a);
+            col = mix(col, mid2, b);
+            col = mix(col, hot, c);
+            return col;
+          }
+
+          void main() {
+            vec4 base = texture2D(colorTexture, v_textureCoordinates);
+            float lum = dot(base.rgb, vec3(0.299, 0.587, 0.114));
+            lum = pow(clamp(lum, 0.0, 1.0), 0.65);
+
+            vec3 col = thermalRamp(lum);
+
+            // Slight glow/bloom for hottest areas (simple intensity boost)
+            float hot = smoothstep(0.80, 1.00, lum);
+            col += hot * vec3(0.25, 0.25, 0.20);
+            col = clamp(col, 0.0, 1.0);
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `,
+      });
+
+      viewer.scene.postProcessStages.add(nightVisionCrtStage);
+      viewer.scene.postProcessStages.add(thermalFlirStage);
+      thermalFlirStage.enabled = false;
+
+      // Sensor mode toggles
+      const sensorButtons = Array.from(document.querySelectorAll("#panelSensors .hud-btn"));
+
+      function setSensorMode(mode) {
+        if (mode === "night") {
+          nightVisionCrtStage.enabled = true;
+          thermalFlirStage.enabled = false;
+        } else if (mode === "thermal") {
+          nightVisionCrtStage.enabled = false;
+          thermalFlirStage.enabled = true;
+        } else {
+          // STANDARD
+          nightVisionCrtStage.enabled = false;
+          thermalFlirStage.enabled = false;
+        }
+
+        for (const btn of sensorButtons) {
+          const isActive = btn.getAttribute("data-mode") === mode;
+          btn.classList.toggle("active", isActive);
+        }
+      }
+
+      for (const btn of sensorButtons) {
+        btn.addEventListener("click", () => {
+          const mode = btn.getAttribute("data-mode") || "standard";
+          setSensorMode(mode);
+        });
+      }
+
+      setSensorMode("night");
     </script>
   </body>
 </html>
