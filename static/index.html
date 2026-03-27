@@ -720,7 +720,6 @@
               <button class="hud-btn active" type="button" data-mode="standard">NORMAL</button>
               <button class="hud-btn" type="button" data-mode="night">NVG</button>
               <button class="hud-btn" type="button" data-mode="thermal">FLIR</button>
-              <button class="hud-btn" type="button" data-mode="thermal">THERMAL</button>
             </div>
           </div>
 
@@ -1307,6 +1306,9 @@
           upsertFlightEntity(f);
         }
         removeStaleFlights(live);
+
+        const flightCountEl = document.getElementById("flightCount");
+        if (flightCountEl) flightCountEl.textContent = live.size;
       }
 
       pollFlightsOnce();
@@ -1410,6 +1412,9 @@
           upsertSatelliteEntity(s);
         }
         removeStaleSatellites(live);
+
+        const satCountEl = document.getElementById("satCount");
+        if (satCountEl) satCountEl.textContent = live.size;
       }
 
       pollSatellitesOnce();
