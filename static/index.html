@@ -720,7 +720,6 @@
               <button class="hud-btn active" type="button" data-mode="standard">NORMAL</button>
               <button class="hud-btn" type="button" data-mode="night">NVG</button>
               <button class="hud-btn" type="button" data-mode="thermal">FLIR</button>
-              <button class="hud-btn" type="button" data-mode="thermal">THERMAL</button>
             </div>
           </div>
 
@@ -1294,19 +1293,29 @@
       }
 
       async function pollFlightsOnce() {
-        const resp = await fetch("/api/flights", { cache: "no-store" });
-        if (!resp.ok) return;
-        const data = await resp.json();
-        const flights = Array.isArray(data.flights) ? data.flights : [];
+        try {
+          const resp = await fetch("/api/flights", { cache: "no-store" });
+          if (!resp.ok) {
+            setDatalinkStatus("FLIGHTS ERR", true, 4000);
+            return;
+          }
+          const data = await resp.json();
+          const flights = Array.isArray(data.flights) ? data.flights : [];
 
-        const live = new Set();
-        for (const f of flights) {
-          if (!f || typeof f.icao24 !== "string") continue;
-          if (typeof f.lon !== "number" || typeof f.lat !== "number") continue;
-          live.add(f.icao24);
-          upsertFlightEntity(f);
+          const live = new Set();
+          for (const f of flights) {
+            if (!f || typeof f.icao24 !== "string") continue;
+            if (typeof f.lon !== "number" || typeof f.lat !== "number") continue;
+            live.add(f.icao24);
+            upsertFlightEntity(f);
+          }
+          removeStaleFlights(live);
+
+          const countEl = document.getElementById("flightCount");
+          if (countEl) countEl.textContent = live.size;
+        } catch (_err) {
+          setDatalinkStatus("FLIGHTS ERR", true, 4000);
         }
-        removeStaleFlights(live);
       }
 
       pollFlightsOnce();
@@ -1397,19 +1406,29 @@
       }
 
       async function pollSatellitesOnce() {
-        const resp = await fetch("/api/satellites", { cache: "no-store" });
-        if (!resp.ok) return;
-        const sats = await resp.json();
-        if (!Array.isArray(sats)) return;
+        try {
+          const resp = await fetch("/api/satellites", { cache: "no-store" });
+          if (!resp.ok) {
+            setDatalinkStatus("SAT ERR", true, 4000);
+            return;
+          }
+          const sats = await resp.json();
+          if (!Array.isArray(sats)) return;
 
-        const live = new Set();
-        for (const s of sats) {
-          if (!s || typeof s.name !== "string") continue;
-          if (typeof s.lon !== "number" || typeof s.lat !== "number" || typeof s.alt !== "number") continue;
-          live.add(s.name);
-          upsertSatelliteEntity(s);
+          const live = new Set();
+          for (const s of sats) {
+            if (!s || typeof s.name !== "string") continue;
+            if (typeof s.lon !== "number" || typeof s.lat !== "number" || typeof s.alt !== "number") continue;
+            live.add(s.name);
+            upsertSatelliteEntity(s);
+          }
+          removeStaleSatellites(live);
+
+          const countEl = document.getElementById("satCount");
+          if (countEl) countEl.textContent = live.size;
+        } catch (_err) {
+          setDatalinkStatus("SAT ERR", true, 4000);
         }
-        removeStaleSatellites(live);
       }
 
       pollSatellitesOnce();
