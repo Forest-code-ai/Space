@@ -15,4 +15,4 @@ if (Test-Path .\requirements.txt) {
 
 Write-Host "Bootstrap complete. Next:"
 Write-Host "  . ./.venv/Scripts/Activate.ps1"
-Write-Host "  python -m vibec"
+Write-Host "  python -m vibe"

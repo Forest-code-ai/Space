@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -11,6 +11,10 @@ from fastapi import Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sgp4.api import Satrec, jday
+
+# TLE text is only updated a few times per day by CelesTrak; cache it to avoid
+# re-fetching on every 15-second satellite poll.
+_tle_cache: dict = {"text": None, "expires_at": datetime.min.replace(tzinfo=timezone.utc)}
 
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_DIR.parent
@@ -171,16 +175,23 @@ def _ecef_to_geodetic_wgs84(r_ecef_m: tuple[float, float, float]) -> tuple[float
 
 @app.get("/api/satellites")
 def get_satellites() -> list[dict]:
-    url = "https://celestrak.org/NORAD/elements/gp.php"
-    params = {"GROUP": "visual", "FORMAT": "tle"}
+    global _tle_cache
 
-    try:
-        response = requests.get(url, params=params, timeout=15)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise HTTPException(status_code=502, detail=f"CelesTrak request failed: {exc}") from exc
+    now = datetime.now(timezone.utc)
+    if _tle_cache["text"] is None or now >= _tle_cache["expires_at"]:
+        url = "https://celestrak.org/NORAD/elements/gp.php"
+        params = {"GROUP": "visual", "FORMAT": "tle"}
+        try:
+            response = requests.get(url, params=params, timeout=15)
+            response.raise_for_status()
+            _tle_cache["text"] = response.text
+            _tle_cache["expires_at"] = now + timedelta(hours=1)
+        except requests.RequestException as exc:
+            if _tle_cache["text"] is None:
+                raise HTTPException(status_code=502, detail=f"CelesTrak request failed: {exc}") from exc
+            # Network error but cache is non-empty — serve stale data silently.
 
-    triples = _parse_tle(response.text)
+    triples = _parse_tle(_tle_cache["text"])
 
     now = datetime.now(timezone.utc)
     jd, fr = jday(
