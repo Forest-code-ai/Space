@@ -152,11 +152,18 @@ def _ecef_to_geodetic_wgs84(r_ecef_m: tuple[float, float, float]) -> tuple[float
         alt = abs(z) - a * (1.0 - f)
         return (math.degrees(lat), math.degrees(lon), alt)
 
+    def _compute_alt(p: float, z: float, lat: float, n: float) -> float:
+        cos_lat = math.cos(lat)
+        # Near the poles cos(lat) → 0; use the z-axis formula instead.
+        if abs(cos_lat) > 1e-9:
+            return p / cos_lat - n
+        return abs(z) / abs(math.sin(lat)) - n * (1.0 - e2)
+
     lat = math.atan2(z, p * (1.0 - e2))
     for _ in range(6):
         sin_lat = math.sin(lat)
         n = a / math.sqrt(1.0 - e2 * sin_lat * sin_lat)
-        alt = p / math.cos(lat) - n
+        alt = _compute_alt(p, z, lat, n)
         lat_next = math.atan2(z, p * (1.0 - e2 * (n / (n + alt))))
         if abs(lat_next - lat) < 1e-12:
             lat = lat_next
@@ -165,7 +172,7 @@ def _ecef_to_geodetic_wgs84(r_ecef_m: tuple[float, float, float]) -> tuple[float
 
     sin_lat = math.sin(lat)
     n = a / math.sqrt(1.0 - e2 * sin_lat * sin_lat)
-    alt = p / math.cos(lat) - n
+    alt = _compute_alt(p, z, lat, n)
     return (math.degrees(lat), math.degrees(lon), alt)
 
 
