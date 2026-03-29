@@ -570,6 +570,8 @@
           <div class="hud-row"><span class="hud-muted">CLOCK</span><span id="hudClock">--:--:--</span></div>
           <div class="hud-row"><span class="hud-muted">SATS</span><span id="satCount">—</span></div>
           <div class="hud-row"><span class="hud-muted">AIR</span><span id="flightCount">—</span></div>
+          <div class="hud-row"><span class="hud-muted">VESSEL</span><span id="vesselCount">—</span></div>
+          <div class="hud-row"><span class="hud-muted">PORTS</span><span id="portCount">—</span></div>
         </div>
 
         <div class="hud-panel">
@@ -594,6 +596,11 @@
               <span class="feed-dot dim"></span>
               <span class="feed-label">ZONE</span>
               <span class="feed-status">STANDBY</span>
+            </div>
+            <div class="feed-item">
+              <span class="feed-dot" id="feedDotMaritime"></span>
+              <span class="feed-label">MARITIME</span>
+              <span class="feed-status" id="feedStatusMaritime">LIVE · 30s</span>
             </div>
           </div>
         </div>
@@ -661,6 +668,10 @@
             <span class="target-label">SPD</span>
             <span id="target-spd" class="target-value">—</span>
           </div>
+          <div class="target-row">
+            <span class="target-label">DEST</span>
+            <span id="target-dest" class="target-value">—</span>
+          </div>
         </div>
 
         <div id="panelIntercept" class="hud-panel">
@@ -711,6 +722,9 @@
               <button class="deck-btn" type="button" data-preset="london">LONDON</button>
               <button class="deck-btn" type="button" data-preset="austin">AUSTIN</button>
               <button class="deck-btn" type="button" data-preset="tokyo">TOKYO</button>
+              <button class="deck-btn" type="button" data-preset="suez">SUEZ</button>
+              <button class="deck-btn" type="button" data-preset="pacific">PACIFIC</button>
+              <button class="deck-btn" type="button" data-preset="atlantic">ATLNTC</button>
             </div>
           </div>
 
@@ -938,6 +952,7 @@
         lat: document.getElementById("target-lat"),
         alt: document.getElementById("target-alt"),
         spd: document.getElementById("target-spd"),
+        dest: document.getElementById("target-dest"),
       };
 
       function fmtCoord(value) {
@@ -974,6 +989,7 @@
         if (targetingEls.lat) targetingEls.lat.textContent = fmtCoord(lat);
         if (targetingEls.alt) targetingEls.alt.textContent = "—";
         if (targetingEls.spd) targetingEls.spd.textContent = "—";
+        if (targetingEls.dest) targetingEls.dest.textContent = "—";
       }
 
       function setTargetingLocked(target) {
@@ -988,6 +1004,7 @@
         if (targetingEls.lat) targetingEls.lat.textContent = fmtCoord(target?.lat);
         if (targetingEls.alt) targetingEls.alt.textContent = fmtMeters(target?.alt);
         if (targetingEls.spd) targetingEls.spd.textContent = fmtSpeed(target?.speed);
+        if (targetingEls.dest) targetingEls.dest.textContent = target?.dest ?? "—";
       }
 
       const LOCK_STYLES = {
@@ -998,6 +1015,10 @@
         aircraft: {
           base: { pixelSize: 6, outlineColor: Cesium.Color.RED, outlineWidth: 1 },
           locked: { pixelSize: 9, outlineColor: Cesium.Color.LIME.withAlpha(0.98), outlineWidth: 3 },
+        },
+        vessel: {
+          base: { pixelSize: 7, outlineColor: new Cesium.Color(0.0, 0.6, 1.0, 1.0), outlineWidth: 1 },
+          locked: { pixelSize: 10, outlineColor: Cesium.Color.LIME.withAlpha(0.98), outlineWidth: 3 },
         },
       };
 
@@ -1023,6 +1044,7 @@
           lat: lockedTarget.lat,
           alt: lockedTarget.alt,
           speed: lockedTarget.speed,
+          dest: lockedTarget.dest ?? null,
         });
       }
 
@@ -1046,7 +1068,7 @@
 
       function lockTargetToEntity(entity) {
         const kind = getEntityKind(entity);
-        if (kind !== "satellite" && kind !== "aircraft") return;
+        if (kind !== "satellite" && kind !== "aircraft" && kind !== "vessel") return;
 
         if (lockedTarget && lockedTarget.entity) {
           applyLockVisual(lockedTarget.entity, lockedTarget.kind, false);
@@ -1055,17 +1077,19 @@
         let key = null;
         if (kind === "satellite") key = getPropValue(entity.properties.name);
         if (kind === "aircraft") key = getPropValue(entity.properties.icao24);
+        if (kind === "vessel") key = getPropValue(entity.properties.mmsi);
 
         lockedTarget = {
           kind,
           key,
           entity,
-          type: kind === "satellite" ? "SATELLITE" : "AIRCRAFT",
+          type: kind === "satellite" ? "SATELLITE" : kind === "vessel" ? "VESSEL" : "AIRCRAFT",
           name: "—",
           lon: NaN,
           lat: NaN,
           alt: NaN,
           speed: kind === "satellite" ? null : NaN,
+          dest: null,
         };
         applyLockVisual(entity, kind, true);
         // Lock camera to entity so it physically follows orbital path / flight path.
@@ -1093,6 +1117,18 @@
             lockedTarget.lat = lat;
             lockedTarget.alt = altM;
             lockedTarget.speed = null;
+            syncTargetingFromLockedTarget();
+          } else if (kind === "vessel") {
+            const name = getPropValue(props.name) || "—";
+            const speedKn = getPropValue(props.speed_kn);
+            const dest = getPropValue(props.dest_port) || "—";
+            lockedTarget.type = "VESSEL";
+            lockedTarget.name = name;
+            lockedTarget.lon = lon;
+            lockedTarget.lat = lat;
+            lockedTarget.alt = 0;
+            lockedTarget.speed = typeof speedKn === "number" ? speedKn * 0.514444 : NaN;
+            lockedTarget.dest = dest;
             syncTargetingFromLockedTarget();
           } else {
             const name = (getPropValue(props.callsign) || "").trim() || getPropValue(props.icao24) || "—";
@@ -1162,14 +1198,16 @@
           const lat = getPropValue(props.lat);
           const lon = getPropValue(props.lon);
           const alt = getPropValue(props.alt_m);
+          const period = getPropValue(props.period_min);
           if (
             typeof name === "string" &&
             typeof lat === "number" &&
             typeof lon === "number" &&
             typeof alt === "number"
           ) {
+            const periodStr = typeof period === "number" ? `\nPERIOD: ${period} min` : "";
             showInspect(
-              `SATELLITE\nNAME: ${name}\nLAT: ${lat.toFixed(5)}\nLON: ${lon.toFixed(5)}\nALT (m): ${Math.round(alt)}`
+              `SATELLITE\nNAME: ${name}\nLAT: ${lat.toFixed(5)}\nLON: ${lon.toFixed(5)}\nALT (m): ${Math.round(alt)}${periodStr}`
             );
           }
           return;
@@ -1178,6 +1216,27 @@
         if (kind === "aircraft") {
           lockTargetToEntity(entity);
           hideInspect();
+          return;
+        }
+
+        if (kind === "vessel") {
+          lockTargetToEntity(entity);
+          const vname = getPropValue(props.name);
+          const vlat = getPropValue(props.lat);
+          const vlon = getPropValue(props.lon);
+          const vtype = getPropValue(props.vessel_type);
+          const vflag = getPropValue(props.flag);
+          const vdest = getPropValue(props.dest_port);
+          const vspd = getPropValue(props.speed_kn);
+          const vhdg = getPropValue(props.heading_deg);
+          showInspect(
+            `VESSEL\nNAME: ${vname || "—"}\nTYPE: ${vtype || "—"}\nFLAG: ${vflag || "—"}` +
+            `\nLAT: ${typeof vlat === "number" ? vlat.toFixed(5) : "—"}` +
+            `\nLON: ${typeof vlon === "number" ? vlon.toFixed(5) : "—"}` +
+            `\nSPEED: ${typeof vspd === "number" ? vspd.toFixed(1) + " kn" : "—"}` +
+            `\nHDG: ${typeof vhdg === "number" ? vhdg + "°" : "—"}` +
+            `\nDEST: ${vdest || "—"}`
+          );
           return;
         }
 
@@ -1260,6 +1319,25 @@
           entity.properties.speed_mps = typeof f.velocity_mps === "number" ? f.velocity_mps : null;
         }
 
+        // Heading vector: short line showing flight direction.
+        if (typeof f.track_deg === "number" && !f.on_ground) {
+          const hdgRad = Cesium.Math.toRadians(f.track_deg);
+          const offsetDeg = 0.018; // ~2 km tick
+          const dLat = offsetDeg * Math.cos(hdgRad);
+          const dLon = offsetDeg * Math.sin(hdgRad) / Math.cos(Cesium.Math.toRadians(f.lat));
+          const tipPos = Cesium.Cartesian3.fromDegrees(f.lon + dLon, f.lat + dLat, alt);
+          if (!entity.polyline) {
+            entity.polyline = new Cesium.PolylineGraphics({
+              positions: [position, tipPos],
+              width: 1.5,
+              material: Cesium.Color.RED.withAlpha(0.65),
+              clampToGround: false,
+            });
+          } else {
+            entity.polyline.positions = [position, tipPos];
+          }
+        }
+
         if (
           lockedTarget &&
           lockedTarget.kind === "aircraft" &&
@@ -1292,34 +1370,62 @@
         }
       }
 
-      async function pollFlightsOnce() {
-        try {
-          const resp = await fetch("/api/flights", { cache: "no-store" });
-          if (!resp.ok) {
-            setDatalinkStatus("FLIGHTS ERR", true, 4000);
-            return;
-          }
-          const data = await resp.json();
-          const flights = Array.isArray(data.flights) ? data.flights : [];
+      // Resilient poller: retries once on failure before backing off.
+      function makeResilientPoller(fn, label, normalMs, backoffMs) {
+        let retryPending = false;
+        let interval = null;
 
-          const live = new Set();
-          for (const f of flights) {
-            if (!f || typeof f.icao24 !== "string") continue;
-            if (typeof f.lon !== "number" || typeof f.lat !== "number") continue;
-            live.add(f.icao24);
-            upsertFlightEntity(f);
+        async function attempt() {
+          try {
+            await fn();
+            if (retryPending) {
+              retryPending = false;
+              // Restore normal interval after recovery.
+              clearInterval(interval);
+              interval = setInterval(attempt, normalMs);
+            }
+          } catch (_e) {
+            if (!retryPending) {
+              retryPending = true;
+              setDatalinkStatus(`${label} ERR`, true, 4000);
+              // Single retry after 2s, then back off.
+              setTimeout(async () => {
+                try { await fn(); retryPending = false; } catch (_e2) {
+                  clearInterval(interval);
+                  interval = setInterval(attempt, backoffMs);
+                }
+              }, 2000);
+            }
           }
-          removeStaleFlights(live);
-
-          const countEl = document.getElementById("flightCount");
-          if (countEl) countEl.textContent = live.size;
-        } catch (_err) {
-          setDatalinkStatus("FLIGHTS ERR", true, 4000);
         }
+
+        attempt();
+        interval = setInterval(attempt, normalMs);
       }
 
-      pollFlightsOnce();
-      setInterval(pollFlightsOnce, 10_000);
+      async function pollFlightsOnce() {
+        const resp = await fetch("/api/flights", { cache: "no-store" });
+        if (!resp.ok) {
+          setDatalinkStatus("FLIGHTS ERR", true, 4000);
+          return;
+        }
+        const data = await resp.json();
+        const flights = Array.isArray(data.flights) ? data.flights : [];
+
+        const live = new Set();
+        for (const f of flights) {
+          if (!f || typeof f.icao24 !== "string") continue;
+          if (typeof f.lon !== "number" || typeof f.lat !== "number") continue;
+          live.add(f.icao24);
+          upsertFlightEntity(f);
+        }
+        removeStaleFlights(live);
+
+        const countEl = document.getElementById("flightCount");
+        if (countEl) countEl.textContent = live.size;
+      }
+
+      makeResilientPoller(pollFlightsOnce, "FLIGHTS", 10_000, 20_000);
 
       // --- Live satellite data (backend proxy) ---
       const satelliteEntitiesByName = new Map();
@@ -1361,6 +1467,7 @@
             lat: s.lat,
             lon: s.lon,
             alt_m: s.alt,
+            period_min: typeof s.period_min === "number" ? s.period_min : null,
           });
 
           satelliteEntitiesByName.set(s.name, entity);
@@ -1406,33 +1513,288 @@
       }
 
       async function pollSatellitesOnce() {
-        try {
-          const resp = await fetch("/api/satellites", { cache: "no-store" });
-          if (!resp.ok) {
-            setDatalinkStatus("SAT ERR", true, 4000);
-            return;
-          }
-          const sats = await resp.json();
-          if (!Array.isArray(sats)) return;
-
-          const live = new Set();
-          for (const s of sats) {
-            if (!s || typeof s.name !== "string") continue;
-            if (typeof s.lon !== "number" || typeof s.lat !== "number" || typeof s.alt !== "number") continue;
-            live.add(s.name);
-            upsertSatelliteEntity(s);
-          }
-          removeStaleSatellites(live);
-
-          const countEl = document.getElementById("satCount");
-          if (countEl) countEl.textContent = live.size;
-        } catch (_err) {
+        const resp = await fetch("/api/satellites", { cache: "no-store" });
+        if (!resp.ok) {
           setDatalinkStatus("SAT ERR", true, 4000);
+          return;
+        }
+        const sats = await resp.json();
+        if (!Array.isArray(sats)) return;
+
+        const live = new Set();
+        for (const s of sats) {
+          if (!s || typeof s.name !== "string") continue;
+          if (typeof s.lon !== "number" || typeof s.lat !== "number" || typeof s.alt !== "number") continue;
+          live.add(s.name);
+          upsertSatelliteEntity(s);
+        }
+        removeStaleSatellites(live);
+
+        const countEl = document.getElementById("satCount");
+        if (countEl) countEl.textContent = live.size;
+      }
+
+      makeResilientPoller(pollSatellitesOnce, "SAT", 15_000, 30_000);
+
+      // ── Satellite period display in inspect ──────────────────────────────
+      // When a satellite is picked, we show period_min from the API.
+      // (handled in the click handler via the inspect panel)
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SUPPLY CHAIN: World Ports (static layer, loaded once)
+      // ─────────────────────────────────────────────────────────────────────
+
+      const portEntitiesByCode = new Map();
+      const portsByName = new Map(); // name (upper) → port data, for route lookup
+
+      async function loadPortsOnce() {
+        try {
+          const resp = await fetch("/api/ports", { cache: "no-store" });
+          if (!resp.ok) return;
+          const ports = await resp.json();
+          if (!Array.isArray(ports)) return;
+
+          for (const p of ports) {
+            if (!p || typeof p.code !== "string") continue;
+            portsByName.set(p.name.toUpperCase(), p);
+            const isMega = p.type === "MEGA_HUB";
+            const color = isMega
+              ? new Cesium.Color(1.0, 0.75, 0.0, 0.95)    // amber-gold for mega hubs
+              : new Cesium.Color(1.0, 0.55, 0.0, 0.80);   // dimmer orange for regional
+
+            const entity = viewer.entities.add({
+              id: `port:${p.code}`,
+              position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
+              point: {
+                color,
+                pixelSize: isMega ? 9 : 6,
+                outlineColor: color,
+                outlineWidth: 1,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              },
+              label: {
+                text: p.name,
+                font: "11px monospace",
+                fillColor: color,
+                showBackground: true,
+                backgroundColor: Cesium.Color.BLACK.withAlpha(0.30),
+                pixelOffset: new Cesium.Cartesian2(8, -8),
+                horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+                verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                distanceDisplayCondition: new Cesium.DistanceDisplayCondition(
+                  0.0,
+                  isMega ? 6_000_000.0 : 2_500_000.0
+                ),
+              },
+            });
+            entity.properties = new Cesium.PropertyBag({
+              kind: "port",
+              code: p.code,
+              name: p.name,
+              lat: p.lat,
+              lon: p.lon,
+              type: p.type,
+              country: p.country,
+            });
+            portEntitiesByCode.set(p.code, entity);
+          }
+
+          const countEl = document.getElementById("portCount");
+          if (countEl) countEl.textContent = portEntitiesByCode.size;
+        } catch (_err) {
+          // Port layer is non-critical; fail silently.
         }
       }
 
-      pollSatellitesOnce();
-      setInterval(pollSatellitesOnce, 15_000);
+      loadPortsOnce();
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SUPPLY CHAIN: Vessel tracking (AIS / demo data)
+      // ─────────────────────────────────────────────────────────────────────
+
+      const vesselEntitiesByMmsi = new Map();
+      const vesselRoutesByMmsi = new Map();  // mmsi → polyline entity for dest route
+      const VESSEL_COLOR = new Cesium.Color(0.0, 0.72, 1.0, 0.95);
+
+      function upsertVesselEntity(v) {
+        const id = `vessel:${v.mmsi}`;
+        const position = Cesium.Cartesian3.fromDegrees(v.lon, v.lat, 0);
+        const labelText = v.name || v.mmsi;
+
+        let entity = vesselEntitiesByMmsi.get(v.mmsi);
+        if (!entity) {
+          entity = viewer.entities.add({
+            id,
+            position,
+            point: {
+              color: VESSEL_COLOR,
+              pixelSize: 7,
+              outlineColor: VESSEL_COLOR,
+              outlineWidth: 1,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+              text: labelText,
+              font: "11px monospace",
+              fillColor: VESSEL_COLOR,
+              showBackground: true,
+              backgroundColor: Cesium.Color.BLACK.withAlpha(0.30),
+              pixelOffset: new Cesium.Cartesian2(10, -8),
+              horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+              verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0.0, 3_000_000.0),
+            },
+          });
+          entity.properties = new Cesium.PropertyBag({
+            kind: "vessel",
+            mmsi: v.mmsi,
+            name: v.name,
+            lat: v.lat,
+            lon: v.lon,
+            vessel_type: v.vessel_type || "CARGO",
+            flag: v.flag || "",
+            dest_port: v.dest_port || "",
+            speed_kn: typeof v.speed_kn === "number" ? v.speed_kn : null,
+            heading_deg: typeof v.heading_deg === "number" ? v.heading_deg : null,
+          });
+          vesselEntitiesByMmsi.set(v.mmsi, entity);
+        } else {
+          entity.position = position;
+          entity.label.text = labelText;
+          entity.properties.lat = v.lat;
+          entity.properties.lon = v.lon;
+          entity.properties.speed_kn = v.speed_kn;
+          entity.properties.heading_deg = v.heading_deg;
+          entity.properties.dest_port = v.dest_port || "";
+        }
+
+        // Update locked target data if this vessel is locked.
+        if (
+          lockedTarget &&
+          lockedTarget.kind === "vessel" &&
+          lockedTarget.key === v.mmsi &&
+          lockedTarget.entity === entity
+        ) {
+          lockedTarget.type = "VESSEL";
+          lockedTarget.name = v.name;
+          lockedTarget.lon = v.lon;
+          lockedTarget.lat = v.lat;
+          lockedTarget.alt = 0;
+          lockedTarget.speed = typeof v.speed_kn === "number" ? v.speed_kn * 0.514444 : NaN;
+          lockedTarget.dest = v.dest_port || "—";
+          syncTargetingFromLockedTarget();
+        }
+
+        // Destination route line: vessel → destination port.
+        const destName = (v.dest_port || "").toUpperCase();
+        const destPort = portsByName.get(destName);
+        const routeId = `route:${v.mmsi}`;
+        if (destPort) {
+          const destPos = Cesium.Cartesian3.fromDegrees(destPort.lon, destPort.lat, 0);
+          const existingRoute = vesselRoutesByMmsi.get(v.mmsi);
+          if (!existingRoute) {
+            const routeEntity = viewer.entities.add({
+              id: routeId,
+              polyline: {
+                positions: [position, destPos],
+                width: 1,
+                material: new Cesium.PolylineDashMaterialProperty({
+                  color: new Cesium.Color(0.0, 0.6, 1.0, 0.28),
+                  dashLength: 12.0,
+                }),
+                clampToGround: false,
+              },
+            });
+            vesselRoutesByMmsi.set(v.mmsi, routeEntity);
+          } else {
+            existingRoute.polyline.positions = [position, destPos];
+          }
+        }
+      }
+
+      function removeStaleVessels(liveMmsiSet) {
+        for (const [mmsi, entity] of vesselEntitiesByMmsi.entries()) {
+          if (!liveMmsiSet.has(mmsi)) {
+            if (lockedTarget && lockedTarget.kind === "vessel" && lockedTarget.key === mmsi) {
+              clearLockedTarget();
+            }
+            viewer.entities.remove(entity);
+            vesselEntitiesByMmsi.delete(mmsi);
+            const routeEnt = vesselRoutesByMmsi.get(mmsi);
+            if (routeEnt) {
+              viewer.entities.remove(routeEnt);
+              vesselRoutesByMmsi.delete(mmsi);
+            }
+          }
+        }
+      }
+
+      async function pollVesselsOnce() {
+        try {
+          const resp = await fetch("/api/vessels", { cache: "no-store" });
+          if (!resp.ok) {
+            const feedDot = document.getElementById("feedDotMaritime");
+            const feedSt = document.getElementById("feedStatusMaritime");
+            if (feedDot) feedDot.classList.add("dim");
+            if (feedSt) feedSt.textContent = "ERR";
+            return;
+          }
+          const vessels = await resp.json();
+          if (!Array.isArray(vessels)) return;
+
+          const live = new Set();
+          for (const v of vessels) {
+            if (!v || typeof v.mmsi !== "string") continue;
+            if (typeof v.lon !== "number" || typeof v.lat !== "number") continue;
+            live.add(v.mmsi);
+            upsertVesselEntity(v);
+          }
+          removeStaleVessels(live);
+
+          const countEl = document.getElementById("vesselCount");
+          if (countEl) countEl.textContent = live.size;
+
+          const feedDot = document.getElementById("feedDotMaritime");
+          const feedSt = document.getElementById("feedStatusMaritime");
+          if (feedDot) feedDot.classList.remove("dim");
+          if (feedSt) feedSt.textContent = vessels[0]?.demo ? "DEMO · 30s" : "LIVE · 30s";
+        } catch (_err) {
+          const feedDot = document.getElementById("feedDotMaritime");
+          if (feedDot) feedDot.classList.add("dim");
+        }
+      }
+
+      pollVesselsOnce();
+      setInterval(pollVesselsOnce, 30_000);
+
+      // ─────────────────────────────────────────────────────────────────────
+      // SUPPLY CHAIN: Status poll → mission log events
+      // ─────────────────────────────────────────────────────────────────────
+      const _scEventSeen = new Set();
+
+      async function pollSupplyChainStatus() {
+        try {
+          const resp = await fetch("/api/supply-chain/status", { cache: "no-store" });
+          if (!resp.ok) return;
+          const sc = await resp.json();
+          const events = Array.isArray(sc.events) ? sc.events : [];
+          for (const ev of events.slice(0, 3)) {
+            const key = `${ev.mmsi}:${ev.port}`;
+            if (_scEventSeen.has(key)) continue;
+            _scEventSeen.add(key);
+            const tag = ev.status === "AT PORT" ? "alert" : "warn";
+            const text = `[SC-EVT] ${ev.vessel} ${ev.status} ${ev.port} (${ev.dist_km}km)`;
+            logMission(text, tag);
+          }
+        } catch (_e) { /* non-critical */ }
+      }
+
+      pollSupplyChainStatus();
+      setInterval(pollSupplyChainStatus, 35_000);
+
+      // ─────────────────────────────────────────────────────────────────────
 
       // Military surveillance aesthetic: night vision phosphor + vignette + grain + CRT scanlines.
       const nightVisionCrtStage = new Cesium.PostProcessStage({
@@ -1623,10 +1985,13 @@
 
       // --- Location preset coordinate table ---
       const LOCATION_PRESETS = {
-        home:   { lon: cctvLon,  lat: cctvLat,  alt: 2500.0, pitch: -45 },
-        london: { lon: -0.0754,  lat: 51.5055,  alt: 800.0,  pitch: -32 },
-        austin: { lon: -97.7431, lat: 30.2672,  alt: 900.0,  pitch: -30 },
-        tokyo:  { lon: 139.7013, lat: 35.6581,  alt: 850.0,  pitch: -30 },
+        home:     { lon: cctvLon,  lat: cctvLat,   alt:    2500.0, pitch: -45 },
+        london:   { lon: -0.0754,  lat: 51.5055,   alt:     800.0, pitch: -32 },
+        austin:   { lon: -97.7431, lat: 30.2672,   alt:     900.0, pitch: -30 },
+        tokyo:    { lon: 139.7013, lat: 35.6581,   alt:     850.0, pitch: -30 },
+        suez:     { lon: 32.5,     lat: 30.0,      alt:  600_000.0, pitch: -55 },
+        pacific:  { lon: 165.0,    lat: 25.0,      alt: 5_000_000.0, pitch: -60 },
+        atlantic: { lon: -35.0,    lat: 45.0,      alt: 5_000_000.0, pitch: -60 },
       };
 
       function setActiveLocationChip(key) {
@@ -1725,6 +2090,20 @@
         if (ctx && ctx.state === "suspended") ctx.resume();
       }, { once: true });
 
+      // --- Mission log: external write API ---
+      // Called by supply chain status polling to inject real events.
+      function logMission(text, cls) {
+        const body = document.getElementById("missionLogBody");
+        if (!body) return;
+        const MAX_VISIBLE = 14;
+        const t = new Date().toLocaleTimeString("en-US", { hour12: false });
+        const span = document.createElement("span");
+        span.className = "log-line" + (cls ? " " + cls : "");
+        span.textContent = `${t} ${text}\n`;
+        body.prepend(span);
+        while (body.children.length > MAX_VISIBLE) body.removeChild(body.lastChild);
+      }
+
       // --- Mission log ticker ---
       (function initMissionLog() {
         const body = document.getElementById("missionLogBody");
@@ -1747,6 +2126,11 @@
           { text: "[INTCPT-094] VELOCITY DELTA 0.03 m/s",      cls: "alert" },
           { text: "[AIR-DATA] 7 CONTACTS IN BBOX",             cls: "" },
           { text: "[WARN] RF INTERFERENCE — COMPENSATING",    cls: "warn" },
+          { text: "[MARITIME] AIS POLL SCHEDULED 30s",        cls: "" },
+          { text: "[SC-FEED] VESSEL POSITIONS UPDATED",       cls: "" },
+          { text: "[MARITIME] CHECKING PORT PROXIMITY...",    cls: "" },
+          { text: "[WARN] VESSEL SIGNAL INTERMITTENT",        cls: "warn" },
+          { text: "[SC-FEED] 20 VESSELS ON ACTIVE ROUTES",   cls: "alert" },
         ];
         const MAX_VISIBLE = 14;
         let pool = [...POOL].sort(() => Math.random() - 0.5);
@@ -1842,6 +2226,14 @@
           if (!detected) {
             for (const [name, ent] of satelliteEntitiesByName.entries()) {
               if (checkEntity(ent, `sat:${name}`, sweepAngle, centerX, centerY, radius, nowMs)) {
+                detected = true;
+                break;
+              }
+            }
+          }
+          if (!detected) {
+            for (const [mmsi, ent] of vesselEntitiesByMmsi.entries()) {
+              if (checkEntity(ent, `vessel:${mmsi}`, sweepAngle, centerX, centerY, radius, nowMs)) {
                 detected = true;
                 break;
               }

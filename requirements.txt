@@ -2,3 +2,4 @@ fastapi>=0.110
 uvicorn[standard]>=0.27
 requests>=2.31
 sgp4>=2.23
+python-dotenv>=1.0
