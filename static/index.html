@@ -578,14 +578,14 @@
           <div class="hud-title">Feed Sources</div>
           <div class="feed-list">
             <div class="feed-item">
-              <span class="feed-dot"></span>
+              <span class="feed-dot" id="feedDotSat"></span>
               <span class="feed-label">SAT</span>
-              <span class="feed-status">LIVE · 15s</span>
+              <span class="feed-status" id="feedStatusSat">LIVE · 15s</span>
             </div>
             <div class="feed-item">
-              <span class="feed-dot"></span>
+              <span class="feed-dot" id="feedDotAir"></span>
               <span class="feed-label">AIR</span>
-              <span class="feed-status">LIVE · 10s</span>
+              <span class="feed-status" id="feedStatusAir">LIVE · 10s</span>
             </div>
             <div class="feed-item">
               <span class="feed-dot"></span>
@@ -963,8 +963,8 @@
         return Number.isFinite(value) ? `${Math.round(value)} m` : "—";
       }
 
-      function fmtSpeed(value) {
-        return Number.isFinite(value) ? `${Math.round(value)} m/s` : "N/A";
+      function fmtSpeed(value, unit = "m/s") {
+        return Number.isFinite(value) ? `${Math.round(value)} ${unit}` : "N/A";
       }
 
       function getPropValue(valueOrProp) {
@@ -1003,7 +1003,7 @@
         if (targetingEls.lon) targetingEls.lon.textContent = fmtCoord(target?.lon);
         if (targetingEls.lat) targetingEls.lat.textContent = fmtCoord(target?.lat);
         if (targetingEls.alt) targetingEls.alt.textContent = fmtMeters(target?.alt);
-        if (targetingEls.spd) targetingEls.spd.textContent = fmtSpeed(target?.speed);
+        if (targetingEls.spd) targetingEls.spd.textContent = fmtSpeed(target?.speed, target?.speedUnit ?? "m/s");
         if (targetingEls.dest) targetingEls.dest.textContent = target?.dest ?? "—";
       }
 
@@ -1044,6 +1044,7 @@
           lat: lockedTarget.lat,
           alt: lockedTarget.alt,
           speed: lockedTarget.speed,
+          speedUnit: lockedTarget.speedUnit ?? "m/s",
           dest: lockedTarget.dest ?? null,
         });
       }
@@ -1127,7 +1128,9 @@
             lockedTarget.lon = lon;
             lockedTarget.lat = lat;
             lockedTarget.alt = 0;
-            lockedTarget.speed = typeof speedKn === "number" ? speedKn * 0.514444 : NaN;
+            // Store speed in knots; targeting display will label it "kn".
+            lockedTarget.speed = typeof speedKn === "number" ? speedKn : NaN;
+            lockedTarget.speedUnit = "kn";
             lockedTarget.dest = dest;
             syncTargetingFromLockedTarget();
           } else {
@@ -1236,6 +1239,37 @@
             `\nSPEED: ${typeof vspd === "number" ? vspd.toFixed(1) + " kn" : "—"}` +
             `\nHDG: ${typeof vhdg === "number" ? vhdg + "°" : "—"}` +
             `\nDEST: ${vdest || "—"}`
+          );
+          return;
+        }
+
+        if (kind === "port") {
+          const pname    = getPropValue(props.name);
+          const pcode    = getPropValue(props.code);
+          const ptype    = getPropValue(props.type);
+          const pcountry = getPropValue(props.country);
+          const plat     = getPropValue(props.lat);
+          const plon     = getPropValue(props.lon);
+
+          // Find vessels currently approaching or at this port from SC status.
+          const nearby = [];
+          for (const [mmsi, status] of vesselScStatus) {
+            const ent = vesselEntitiesByMmsi.get(mmsi);
+            if (!ent || !ent.properties) continue;
+            const vname = getPropValue(ent.properties.name) || mmsi;
+            const vdest = (getPropValue(ent.properties.dest_port) || "").toUpperCase();
+            const portNameUp = (pname || "").toUpperCase();
+            if (vdest === portNameUp || status) nearby.push(`${vname} — ${status}`);
+          }
+          const nearbyStr = nearby.length ? `\nNEARBY:\n  ${nearby.slice(0, 5).join("\n  ")}` : "";
+
+          showInspect(
+            `PORT\nNAME: ${pname || "—"}\nCODE: ${pcode || "—"}` +
+            `\nTYPE: ${(ptype || "—").replace(/_/g, " ")}` +
+            `\nCOUNTRY: ${pcountry || "—"}` +
+            `\nLAT: ${typeof plat === "number" ? plat.toFixed(4) : "—"}` +
+            `\nLON: ${typeof plon === "number" ? plon.toFixed(4) : "—"}` +
+            nearbyStr
           );
           return;
         }
@@ -1370,6 +1404,51 @@
         }
       }
 
+      // ── Feed staleness tracker ────────────────────────────────────────────
+      // Records the last successful poll timestamp per feed and marks the feed
+      // dot + status text as STALE when it exceeds 2× the expected interval.
+      const _feedLastSuccess = {};
+
+      function markFeedSuccess(dotId, statusId, liveText) {
+        _feedLastSuccess[dotId] = Date.now();
+        const dot = document.getElementById(dotId);
+        const st  = document.getElementById(statusId);
+        if (dot) { dot.classList.remove("dim"); dot.style.background = ""; dot.style.boxShadow = ""; }
+        if (st)  st.textContent = liveText;
+      }
+
+      function markFeedError(dotId, statusId) {
+        const dot = document.getElementById(dotId);
+        const st  = document.getElementById(statusId);
+        if (dot) { dot.classList.add("dim"); dot.style.background = "rgba(255,59,59,0.5)"; dot.style.boxShadow = "none"; }
+        if (st)  st.textContent = "ERR";
+      }
+
+      // Check all feeds for staleness every 15s.
+      const _feedStaleLimits = {
+        feedDotAir:     { statusId: "feedStatusAir",     limitMs: 20_000,  liveText: "LIVE · 10s" },
+        feedDotSat:     { statusId: "feedStatusSat",     limitMs: 30_000,  liveText: "LIVE · 15s" },
+        feedDotMaritime:{ statusId: "feedStatusMaritime", limitMs: 70_000, liveText: "LIVE · 30s" },
+      };
+
+      setInterval(() => {
+        const now = Date.now();
+        for (const [dotId, cfg] of Object.entries(_feedStaleLimits)) {
+          const last = _feedLastSuccess[dotId];
+          if (!last) continue;  // hasn't polled yet
+          const age = now - last;
+          if (age > cfg.limitMs) {
+            const secs = Math.round(age / 1000);
+            const st = document.getElementById(cfg.statusId);
+            if (st && !st.textContent.startsWith("STALE")) {
+              st.textContent = `STALE · ${secs}s`;
+              const dot = document.getElementById(dotId);
+              if (dot) { dot.classList.add("dim"); dot.style.background = "rgba(255,176,0,0.55)"; dot.style.boxShadow = "none"; }
+            }
+          }
+        }
+      }, 5_000);
+
       // Resilient poller: retries once on failure before backing off.
       function makeResilientPoller(fn, label, normalMs, backoffMs) {
         let retryPending = false;
@@ -1417,12 +1496,13 @@
           if (!f || typeof f.icao24 !== "string") continue;
           if (typeof f.lon !== "number" || typeof f.lat !== "number") continue;
           live.add(f.icao24);
-          upsertFlightEntity(f);
+          try { upsertFlightEntity(f); } catch (e) { console.warn("[flights] upsert failed:", e); }
         }
         removeStaleFlights(live);
 
         const countEl = document.getElementById("flightCount");
         if (countEl) countEl.textContent = live.size;
+        markFeedSuccess("feedDotAir", "feedStatusAir", "LIVE · 10s");
       }
 
       makeResilientPoller(pollFlightsOnce, "FLIGHTS", 10_000, 20_000);
@@ -1526,12 +1606,13 @@
           if (!s || typeof s.name !== "string") continue;
           if (typeof s.lon !== "number" || typeof s.lat !== "number" || typeof s.alt !== "number") continue;
           live.add(s.name);
-          upsertSatelliteEntity(s);
+          try { upsertSatelliteEntity(s); } catch (e) { console.warn("[satellites] upsert failed:", e); }
         }
         removeStaleSatellites(live);
 
         const countEl = document.getElementById("satCount");
         if (countEl) countEl.textContent = live.size;
+        markFeedSuccess("feedDotSat", "feedStatusSat", "LIVE · 15s");
       }
 
       makeResilientPoller(pollSatellitesOnce, "SAT", 15_000, 30_000);
@@ -1682,7 +1763,8 @@
           lockedTarget.lon = v.lon;
           lockedTarget.lat = v.lat;
           lockedTarget.alt = 0;
-          lockedTarget.speed = typeof v.speed_kn === "number" ? v.speed_kn * 0.514444 : NaN;
+          lockedTarget.speed = typeof v.speed_kn === "number" ? v.speed_kn : NaN;
+          lockedTarget.speedUnit = "kn";
           lockedTarget.dest = v.dest_port || "—";
           syncTargetingFromLockedTarget();
         }
@@ -1735,10 +1817,7 @@
         try {
           const resp = await fetch("/api/vessels", { cache: "no-store" });
           if (!resp.ok) {
-            const feedDot = document.getElementById("feedDotMaritime");
-            const feedSt = document.getElementById("feedStatusMaritime");
-            if (feedDot) feedDot.classList.add("dim");
-            if (feedSt) feedSt.textContent = "ERR";
+            markFeedError("feedDotMaritime", "feedStatusMaritime");
             return;
           }
           const vessels = await resp.json();
@@ -1749,20 +1828,17 @@
             if (!v || typeof v.mmsi !== "string") continue;
             if (typeof v.lon !== "number" || typeof v.lat !== "number") continue;
             live.add(v.mmsi);
-            upsertVesselEntity(v);
+            try { upsertVesselEntity(v); } catch (e) { console.warn("[vessels] upsert failed:", e); }
           }
           removeStaleVessels(live);
 
           const countEl = document.getElementById("vesselCount");
           if (countEl) countEl.textContent = live.size;
 
-          const feedDot = document.getElementById("feedDotMaritime");
-          const feedSt = document.getElementById("feedStatusMaritime");
-          if (feedDot) feedDot.classList.remove("dim");
-          if (feedSt) feedSt.textContent = vessels[0]?.demo ? "DEMO · 30s" : "LIVE · 30s";
+          const liveText = vessels[0]?.demo ? "DEMO · 30s" : "LIVE · 30s";
+          markFeedSuccess("feedDotMaritime", "feedStatusMaritime", liveText);
         } catch (_err) {
-          const feedDot = document.getElementById("feedDotMaritime");
-          if (feedDot) feedDot.classList.add("dim");
+          markFeedError("feedDotMaritime", "feedStatusMaritime");
         }
       }
 
@@ -1773,6 +1849,27 @@
       // SUPPLY CHAIN: Status poll → mission log events
       // ─────────────────────────────────────────────────────────────────────
       const _scEventSeen = new Set();
+      // mmsi → "AT PORT" | "APPROACHING" | null
+      const vesselScStatus = new Map();
+
+      const SC_COLOR_ATPORT     = new Cesium.Color(1.0, 0.75, 0.0, 0.98);  // amber-gold
+      const SC_COLOR_APPROACHING= new Cesium.Color(1.0, 0.55, 0.1, 0.88);  // orange
+      const SC_COLOR_NORMAL     = VESSEL_COLOR;                              // cyan-blue
+
+      function applyVesselScColor(mmsi, status) {
+        const entity = vesselEntitiesByMmsi.get(mmsi);
+        if (!entity || !entity.point) return;
+        const color = status === "AT PORT"    ? SC_COLOR_ATPORT
+                    : status === "APPROACHING" ? SC_COLOR_APPROACHING
+                    : SC_COLOR_NORMAL;
+        const size  = status === "AT PORT"    ? 10
+                    : status === "APPROACHING" ? 9
+                    : 7;
+        entity.point.color       = color;
+        entity.point.outlineColor= color;
+        entity.point.pixelSize   = size;
+        if (entity.label) entity.label.fillColor = color;
+      }
 
       async function pollSupplyChainStatus() {
         try {
@@ -1780,13 +1877,27 @@
           if (!resp.ok) return;
           const sc = await resp.json();
           const events = Array.isArray(sc.events) ? sc.events : [];
-          for (const ev of events.slice(0, 3)) {
+
+          // Reset all vessels to normal, then apply SC status from fresh data.
+          for (const [mmsi] of vesselScStatus) {
+            if (!events.find(e => e.mmsi === mmsi)) {
+              vesselScStatus.delete(mmsi);
+              applyVesselScColor(mmsi, null);
+            }
+          }
+
+          for (const ev of events) {
+            const prev = vesselScStatus.get(ev.mmsi);
+            vesselScStatus.set(ev.mmsi, ev.status);
+            applyVesselScColor(ev.mmsi, ev.status);
+
+            // Log new events to mission log (only once per mmsi:port combo).
             const key = `${ev.mmsi}:${ev.port}`;
-            if (_scEventSeen.has(key)) continue;
-            _scEventSeen.add(key);
-            const tag = ev.status === "AT PORT" ? "alert" : "warn";
-            const text = `[SC-EVT] ${ev.vessel} ${ev.status} ${ev.port} (${ev.dist_km}km)`;
-            logMission(text, tag);
+            if (!_scEventSeen.has(key)) {
+              _scEventSeen.add(key);
+              const tag = ev.status === "AT PORT" ? "alert" : "warn";
+              logMission(`[SC-EVT] ${ev.vessel} ${ev.status} ${ev.port} (${ev.dist_km}km)`, tag);
+            }
           }
         } catch (_e) { /* non-critical */ }
       }
@@ -1990,8 +2101,8 @@
         austin:   { lon: -97.7431, lat: 30.2672,   alt:     900.0, pitch: -30 },
         tokyo:    { lon: 139.7013, lat: 35.6581,   alt:     850.0, pitch: -30 },
         suez:     { lon: 32.5,     lat: 30.0,      alt:  600_000.0, pitch: -55 },
-        pacific:  { lon: 165.0,    lat: 25.0,      alt: 5_000_000.0, pitch: -60 },
-        atlantic: { lon: -35.0,    lat: 45.0,      alt: 5_000_000.0, pitch: -60 },
+        pacific:  { lon: 165.0,    lat: 25.0,      alt: 5_000_000.0, pitch: -90 },
+        atlantic: { lon: -35.0,    lat: 45.0,      alt: 5_000_000.0, pitch: -90 },
       };
 
       function setActiveLocationChip(key) {
@@ -2383,12 +2494,28 @@
       // --- Image Control sliders → CSS filter on viewport ---
       (function initImageSliders() {
         const frame = document.getElementById("viewportFrame");
+        const LS_KEY = "space:sliders";
+        const DEFAULTS = { gain: 72, contrast: 58, noise: 24, bloom: 40 };
+        let saved = DEFAULTS;
+        try {
+          const raw = localStorage.getItem(LS_KEY);
+          if (raw) saved = { ...DEFAULTS, ...JSON.parse(raw) };
+        } catch (_) {}
+
         const sliders = {
-          gain:     { el: document.getElementById("sliderGain"),     val: 72 },
-          contrast: { el: document.getElementById("sliderContrast"), val: 58 },
-          noise:    { el: document.getElementById("sliderNoise"),    val: 24 },
-          bloom:    { el: document.getElementById("sliderBloom"),    val: 40 },
+          gain:     { el: document.getElementById("sliderGain"),     val: saved.gain },
+          contrast: { el: document.getElementById("sliderContrast"), val: saved.contrast },
+          noise:    { el: document.getElementById("sliderNoise"),    val: saved.noise },
+          bloom:    { el: document.getElementById("sliderBloom"),    val: saved.bloom },
         };
+
+        // Restore saved values to DOM inputs.
+        for (const [key, s] of Object.entries(sliders)) {
+          if (!s.el) continue;
+          s.el.value = s.val;
+          const valEl = s.el.nextElementSibling;
+          if (valEl) valEl.textContent = s.val;
+        }
 
         function applyFilter() {
           if (!frame) return;
@@ -2403,13 +2530,19 @@
           frame.style.filter = `brightness(${b}) contrast(${c}) blur(${bl}px) saturate(${s})`;
         }
 
-        for (const s of Object.values(sliders)) {
+        for (const [key, s] of Object.entries(sliders)) {
           if (!s.el) continue;
           s.el.addEventListener("input", (e) => {
             s.val = Number(e.target.value);
             const valEl = e.target.nextElementSibling;
             if (valEl) valEl.textContent = s.val;
             applyFilter();
+            try {
+              localStorage.setItem(LS_KEY, JSON.stringify({
+                gain: sliders.gain.val, contrast: sliders.contrast.val,
+                noise: sliders.noise.val, bloom: sliders.bloom.val,
+              }));
+            } catch (_) {}
           });
         }
         applyFilter();

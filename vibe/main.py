@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 import time
@@ -17,6 +18,13 @@ from sgp4.api import Satrec, jday
 
 load_dotenv()
 
+log = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+
 PACKAGE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = PACKAGE_DIR.parent
 STATIC_DIR = PROJECT_ROOT / "static"
@@ -30,6 +38,12 @@ FLIGHTS_LOMAX = float(os.getenv("FLIGHTS_LOMAX", "-76.0"))
 
 # Optional AIS stream API key for live vessel data
 AISSTREAM_API_KEY = os.getenv("AISSTREAM_API_KEY", "")
+
+log.info(
+    "Space config — bbox: (%.2f,%.2f)→(%.2f,%.2f)  AIS key: %s",
+    FLIGHTS_LAMIN, FLIGHTS_LOMIN, FLIGHTS_LAMAX, FLIGHTS_LOMAX,
+    "SET" if AISSTREAM_API_KEY else "unset (demo mode)",
+)
 
 # ── In-memory TTL cache ────────────────────────────────────────────────────
 
@@ -93,6 +107,7 @@ async def security_and_rate_limit(request: Request, call_next: Any) -> Response:
         client_ip = request.client.host if request.client else "unknown"
         if not _limiter.is_allowed(client_ip):
             retry = _limiter.retry_after(client_ip)
+            log.warning("Rate limit hit from %s — retry in %ds", client_ip, retry)
             return JSONResponse(
                 status_code=429,
                 content={"error": "Rate limit exceeded", "retry_after_seconds": retry},
@@ -182,6 +197,7 @@ def get_flights() -> dict:
         )
         response.raise_for_status()
     except requests.RequestException as exc:
+        log.warning("OpenSky request failed: %s", exc)
         raise HTTPException(
             status_code=502,
             detail={"error": "OpenSky request failed", "source": str(exc)},
@@ -190,6 +206,7 @@ def get_flights() -> dict:
     try:
         payload = response.json()
     except ValueError as exc:
+        log.warning("OpenSky returned invalid JSON: %s", exc)
         raise HTTPException(
             status_code=502,
             detail={"error": "OpenSky returned invalid JSON", "source": str(exc)},
@@ -307,6 +324,7 @@ def get_satellites() -> list[dict]:
         )
         response.raise_for_status()
     except requests.RequestException as exc:
+        log.warning("CelesTrak request failed: %s", exc)
         raise HTTPException(
             status_code=502,
             detail={"error": "CelesTrak request failed", "source": str(exc)},
@@ -398,8 +416,9 @@ def _drift_position(v: dict, now_s: float) -> tuple[float, float]:
     """Compute current vessel position using cyclic drift around base coordinates."""
     speed_ms = v["speed_kn"] * 0.514444
     hdg_rad = math.radians(v["heading_deg"])
-    # Phase within current cycle [0, 1) — reverses on second half to simulate round-trip.
-    phase = (now_s % _VESSEL_CYCLE_S) / _VESSEL_CYCLE_S
+    # Per-vessel phase offset derived from MMSI so ships stagger across the cycle.
+    phase_offset = (int(v["mmsi"][-3:]) / 1000.0) * _VESSEL_CYCLE_S
+    phase = ((now_s + phase_offset) % _VESSEL_CYCLE_S) / _VESSEL_CYCLE_S
     direction = phase if phase < 0.5 else (1.0 - phase)
     dist_m = speed_ms * (direction * _VESSEL_CYCLE_S)
     dlat = (dist_m * math.cos(hdg_rad)) / (1000.0 * _KM_PER_DEG_LAT)
