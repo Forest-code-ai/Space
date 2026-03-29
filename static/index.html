@@ -367,7 +367,7 @@
       }
 
       /* ── Inspect panel ───────────────────────────────────────────────── */
-      #panelInspect { display: none; flex-shrink: 1; overflow: auto; }
+      #panelInspect { display: none; flex-shrink: 1; overflow: auto; max-height: 220px; }
       #inspectBody  { font-size: 11px; line-height: 1.55; white-space: pre-wrap; opacity: 0.88; }
 
       /* ── Live intercept log ─────────────────────────────────────────── */
@@ -387,11 +387,12 @@
         display: flex;
         flex-direction: column;
         justify-content: center;
-        gap: 8px;
-        padding: 10px 16px;
+        gap: 6px;
+        padding: 8px 16px;
         background: var(--c-panel);
         border: 1px solid var(--c-border);
         position: relative;
+        overflow: hidden;
       }
       #bottomShell::before {
         content: ""; position: absolute; left: -1px; top: -1px;
@@ -436,7 +437,7 @@
         font-family: var(--font);
         font-size: 10px;
         letter-spacing: 0.12em;
-        padding: 5px 13px;
+        padding: 4px 10px;
         border: 1px solid var(--c-border);
         background: rgba(0,0,0,0.22);
         color: var(--c-cyan);
@@ -554,6 +555,36 @@
       .log-line { display: block; }
       .log-line.warn  { color: var(--c-amber); }
       .log-line.alert { color: var(--c-green); }
+
+      /* ── Responsive: collapse rails on narrow screens ─────────────────── */
+      @media (max-width: 900px) {
+        #shell {
+          grid-template-columns: 1fr;
+          grid-template-rows: auto 1fr auto auto;
+          grid-template-areas:
+            "left"
+            "center"
+            "right"
+            "deck";
+          width: 99vw;
+          height: auto;
+          min-height: 100svh;
+        }
+        #leftRail, #rightRail {
+          width: 100%;
+          max-height: none;
+          overflow: visible;
+        }
+        #viewportFrame {
+          width: 100%;
+          aspect-ratio: 4/3;
+          border-radius: 0;
+        }
+        #cesiumContainer { border-radius: 0; }
+        /* Hide scanlines/vignette decorations on small screens */
+        #viewportFrame::after { display: none; }
+      }
+    </style>
   </head>
   <body>
     <div id="appShell">
@@ -2221,27 +2252,47 @@
         if (!body) return;
 
         const POOL = [
-          { text: "[SYS-001] UPLINK AUTHENTICATED",           cls: "" },
-          { text: "[ORBITAL] PROPAGATING TLE DATA...",         cls: "" },
-          { text: "[INTCPT-092] SIGNAL STRENGTH 88%",           cls: "alert" },
-          { text: "[SENSOR-FIX] HUNTER/BETHUNE STABLE",        cls: "alert" },
-          { text: "[AIR-DATA] POLLING OPENSKY NETWORK",        cls: "" },
-          { text: "[ORBITAL] SGP4 TICK COMPLETE",              cls: "" },
-          { text: "[WARN] IONOSPHERIC SCATTER DETECTED",       cls: "warn" },
-          { text: "[INTCPT-093] BEARING 247° CONFIRMED",       cls: "alert" },
-          { text: "[SAT-FEED] 15s REFRESH SCHEDULED",          cls: "" },
-          { text: "[WARN] CHANNEL NOISE +2.1 dB",              cls: "warn" },
-          { text: "[SENSOR-FIX] LOCK INTEGRITY 99.4%",         cls: "alert" },
-          { text: "[ORBITAL] NEXT PASS IN 00:08:42",           cls: "" },
-          { text: "[SYS-002] THERMAL STAGE STANDBY",           cls: "" },
-          { text: "[INTCPT-094] VELOCITY DELTA 0.03 m/s",      cls: "alert" },
-          { text: "[AIR-DATA] 7 CONTACTS IN BBOX",             cls: "" },
-          { text: "[WARN] RF INTERFERENCE — COMPENSATING",    cls: "warn" },
-          { text: "[MARITIME] AIS POLL SCHEDULED 30s",        cls: "" },
-          { text: "[SC-FEED] VESSEL POSITIONS UPDATED",       cls: "" },
-          { text: "[MARITIME] CHECKING PORT PROXIMITY...",    cls: "" },
-          { text: "[WARN] VESSEL SIGNAL INTERMITTENT",        cls: "warn" },
-          { text: "[SC-FEED] 20 VESSELS ON ACTIVE ROUTES",   cls: "alert" },
+          { text: "[SYS-001] UPLINK AUTHENTICATED",              cls: "" },
+          { text: "[ORBITAL] PROPAGATING TLE DATA...",            cls: "" },
+          { text: "[INTCPT-092] SIGNAL STRENGTH 88%",             cls: "alert" },
+          { text: "[SENSOR-FIX] HUNTER/BETHUNE STABLE",           cls: "alert" },
+          { text: "[AIR-DATA] POLLING OPENSKY NETWORK",           cls: "" },
+          { text: "[ORBITAL] SGP4 TICK COMPLETE",                 cls: "" },
+          { text: "[WARN] IONOSPHERIC SCATTER DETECTED",          cls: "warn" },
+          { text: "[INTCPT-093] BEARING 247° CONFIRMED",          cls: "alert" },
+          { text: "[SAT-FEED] 15s REFRESH SCHEDULED",             cls: "" },
+          { text: "[WARN] CHANNEL NOISE +2.1 dB",                 cls: "warn" },
+          { text: "[SENSOR-FIX] LOCK INTEGRITY 99.4%",            cls: "alert" },
+          { text: "[ORBITAL] NEXT PASS IN 00:08:42",              cls: "" },
+          { text: "[SYS-002] THERMAL STAGE STANDBY",              cls: "" },
+          { text: "[INTCPT-094] VELOCITY DELTA 0.03 m/s",         cls: "alert" },
+          { text: "[AIR-DATA] 7 CONTACTS IN BBOX",                cls: "" },
+          { text: "[WARN] RF INTERFERENCE — COMPENSATING",        cls: "warn" },
+          { text: "[MARITIME] AIS POLL SCHEDULED 30s",            cls: "" },
+          { text: "[SC-FEED] VESSEL POSITIONS UPDATED",           cls: "" },
+          { text: "[MARITIME] CHECKING PORT PROXIMITY...",        cls: "" },
+          { text: "[WARN] VESSEL SIGNAL INTERMITTENT",            cls: "warn" },
+          { text: "[SC-FEED] 20 VESSELS ON ACTIVE ROUTES",        cls: "alert" },
+          { text: "[SYS-003] CLOCK SYNC NTP OK ±4ms",             cls: "" },
+          { text: "[ORBITAL] ISS ELEVATION ANGLE 22.4°",          cls: "" },
+          { text: "[INTCPT-095] FREQUENCY LOCK 1575.42 MHz",      cls: "alert" },
+          { text: "[AIR-DATA] ALTITUDE FLOOR 5500 ft ACTIVE",     cls: "" },
+          { text: "[WARN] SOLAR FLUX INDEX 148 — ELEVATED",       cls: "warn" },
+          { text: "[SENSOR-FIX] GYRO DRIFT ±0.002°/hr",          cls: "alert" },
+          { text: "[ORBITAL] PERIGEE 408 km / APOGEE 416 km",     cls: "" },
+          { text: "[SC-FEED] SUEZ CORRIDOR: 3 CONTACTS",          cls: "alert" },
+          { text: "[MARITIME] MALACCA STRAIT DENSITY HIGH",       cls: "" },
+          { text: "[SYS-004] WATCHDOG HEARTBEAT OK",              cls: "" },
+          { text: "[AIR-DATA] SQUAWK 7700 ALERT CLEARED",         cls: "warn" },
+          { text: "[WARN] DOPPLER SMEAR ON TRACK-7",              cls: "warn" },
+          { text: "[ORBITAL] DECAY RATE 0.000041 km/day",         cls: "" },
+          { text: "[INTCPT-096] CROSS-TRACK ERROR 1.2 m",         cls: "alert" },
+          { text: "[SC-FEED] ROTTERDAM ETA WINDOW ±2h",           cls: "" },
+          { text: "[MARITIME] VESSEL DRAFT ALERT — SHALLOW",      cls: "warn" },
+          { text: "[SYS-005] MEMORY POOL 94% CLEAN",              cls: "" },
+          { text: "[AIR-DATA] TCAS RA EVENT LOGGED",              cls: "alert" },
+          { text: "[ORBITAL] GROUND TRACK UPDATE APPLIED",        cls: "" },
+          { text: "[WARN] ATMOSPHERIC DRAG COEFFICIENT SHIFTED",  cls: "warn" },
         ];
         const MAX_VISIBLE = 14;
         let pool = [...POOL].sort(() => Math.random() - 0.5);
@@ -2250,6 +2301,11 @@
         function tick() {
           const entry = pool[idx % pool.length];
           idx++;
+          // Reshuffle when we complete a full cycle to avoid visible repetition.
+          if (idx > 0 && idx % pool.length === 0) {
+            pool = [...POOL].sort(() => Math.random() - 0.5);
+            idx = 0;
+          }
           const t = new Date().toLocaleTimeString("en-US", { hour12:false });
           const span = document.createElement("span");
           span.className = "log-line" + (entry.cls ? " " + entry.cls : "");
@@ -2260,7 +2316,7 @@
         }
 
         tick();
-        setInterval(tick, 2200);
+        setInterval(tick, 4000);
       })();
 
       // --- Reticle ping when sweep passes entity zone ---
