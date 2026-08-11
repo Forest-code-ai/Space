@@ -707,7 +707,7 @@
           <div class="deck-row">
             <span class="deck-label">Location</span>
             <div class="hud-btns">
-              <button class="deck-btn" type="button" data-preset="home">HOME</button>
+              <button class="deck-btn" type="button" data-preset="home">DEMO</button>
               <button class="deck-btn" type="button" data-preset="london">LONDON</button>
               <button class="deck-btn" type="button" data-preset="austin">AUSTIN</button>
               <button class="deck-btn" type="button" data-preset="tokyo">TOKYO</button>
@@ -806,18 +806,18 @@
       });
       const cctvOutlineColor = Cesium.Color.LIME.withAlpha(0.95);
 
-      // Hunter St. & Bethune St. intersection (Peterborough, ON)
+      // Synthetic CCTV demo zone using non-sensitive placeholder coordinates
       // Enlarged bounds for easier verification from mid-altitude.
       const cctvRect = Cesium.Rectangle.fromDegrees(
-        -78.3318,
-        44.2965,
-        -78.3118,
-        44.3125
+        -0.01,
+        -0.01,
+        0.01,
+        0.01
       );
 
       const cctvRectEntity = viewer.entities.add({
         id: "cctv:01:rect",
-        name: "CCTV-01: HUNTER/BETHUNE LIVE",
+        name: "CCTV-01: DEMO ZONE LIVE",
         rectangle: {
           coordinates: cctvRect,
           material: cctvNoiseMaterial,
@@ -829,13 +829,13 @@
         },
       });
 
-      const cctvLon = -78.3218;
-      const cctvLat = 44.3045;
+      const cctvLon = 0.0;
+      const cctvLat = 0.0;
       const cctvTopAltM = 220.0;
 
       cctvRectEntity.properties = new Cesium.PropertyBag({
         kind: "cctv",
-        name: "CCTV-01: HUNTER/BETHUNE LIVE",
+        name: "CCTV-01: DEMO ZONE LIVE",
         centerLon: cctvLon,
         centerLat: cctvLat,
         status: "ACTIVE",
@@ -873,7 +873,7 @@
         id: "cctv:01:label",
         position: Cesium.Cartesian3.fromDegrees(cctvLon, cctvLat, cctvTopAltM),
         label: {
-          text: "CCTV-01: HUNTER/BETHUNE LIVE",
+          text: "CCTV-01: DEMO ZONE LIVE",
           font: "14px monospace",
           fillColor: Cesium.Color.LIME,
           showBackground: true,
@@ -1659,12 +1659,12 @@
         });
       }
 
-      // --- Canonical home flyTo (delegates to preset table) ---
+      // --- Synthetic demo-zone flyTo (delegates to preset table) ---
       function flyToHome() {
         flyToPreset("home");
       }
 
-      // Override Cesium's native home button — fly to CCTV-01 instead of globe.
+      // Override Cesium's native home button — fly to the synthetic CCTV demo zone.
       if (viewer.homeButton) {
         viewer.homeButton.viewModel.command.beforeExecute.addEventListener(function (e) {
           e.cancel = true;
@@ -1679,7 +1679,7 @@
         flyToPreset(btn.getAttribute("data-preset") || "home");
       });
 
-      // Mark HOME as active on initial load.
+      // Mark the synthetic demo zone as active on initial load.
       setActiveLocationChip("home");
 
       // --- Web Audio: background hum + mode-switch click ---
@@ -1734,7 +1734,7 @@
           { text: "[SYS-001] UPLINK AUTHENTICATED",           cls: "" },
           { text: "[ORBITAL] PROPAGATING TLE DATA...",         cls: "" },
           { text: "[INTCPT-092] SIGNAL STRENGTH 88%",           cls: "alert" },
-          { text: "[SENSOR-FIX] HUNTER/BETHUNE STABLE",        cls: "alert" },
+          { text: "[SENSOR-FIX] DEMO ZONE STABLE",             cls: "alert" },
           { text: "[AIR-DATA] POLLING OPENSKY NETWORK",        cls: "" },
           { text: "[ORBITAL] SGP4 TICK COMPLETE",              cls: "" },
           { text: "[WARN] IONOSPHERIC SCATTER DETECTED",       cls: "warn" },
@@ -1981,7 +1981,7 @@
           const inZone = insideRect(ll.lon, ll.lat, cctvRect);
           if (inZone && !_cctvAutoEngaged) {
             _cctvAutoEngaged = true;
-            startCctvSensorLog("CCTV-01: HUNTER/BETHUNE LIVE", cctvLat, cctvLon, "AUTO");
+            startCctvSensorLog("CCTV-01: DEMO ZONE LIVE", cctvLat, cctvLon, "AUTO");
           } else if (!inZone && _cctvAutoEngaged) {
             stopCctvSensorLog();
           }
