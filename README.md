@@ -16,7 +16,7 @@ We are moving beyond language models into **spatial intelligence**—systems tha
 * **Tactical WebGL Shaders:** Custom `Cesium.PostProcessStage` fragment shaders that hijack the rendering pipeline to compute screen-space luminance, mapping it to:
   * **Night Vision:** High-contrast phosphor green with CRT scanlines and animated film grain.
   * **FLIR Thermal:** Heat-signature simulation utilizing a localized color ramp and high-luminance blooming.
-* **Spatial Video Projection:** Drapes live looping video feeds onto specific geographical coordinate geometry (Test Zone: Hunter St & Bethune St intersection).
+* **Spatial Video Projection:** Drapes simulated video feeds onto a generic synthetic demo zone for visualization testing.
 * **“God Mode” HUD:** A responsive, absolute-positioned tactical overlay featuring live mouse coordinate targeting and sensor array toggles.
 
 ## 🛠️ Tech Stack
